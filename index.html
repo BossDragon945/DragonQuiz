@@ -286,8 +286,9 @@
   (function () {
     "use strict";
 
-    // 題目、答案、計時、計分都在 Apps Script 那邊。
-    // 這裡一次只拿得到一題,倒數也只是顯示用:逾時與否由伺服器的時鐘決定。
+    // 題庫、正解、計分都在 Apps Script 那邊。
+    // 題目在 begin 時一次拿到(不含正解),換題純在本機處理;
+    // 作答秒數由這裡回報,伺服器依此判斷逾時並批改。
 
     var LETTERS = ["A", "B", "C", "D", "E", "F"];
     var STATUS_TEXT = { ok: "答對", wrong: "答錯", timeout: "逾時", left: "離開畫面" };

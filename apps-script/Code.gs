@@ -7,8 +7,8 @@
  * 部署後拿到的網址,填進 config.js 的 appsScriptUrl。
  *
  * 題目與正確答案放在試算表的「題庫」工作表,只存在 Google 這邊。
- * 題目一次只發一題,每題的作答時間由這裡計時,
- * 網頁端改時間、按 F12 都看不到答案,也延長不了時間。
+ * 開始作答時一次發出全部題目(不含正解),批改與計分都在這裡做,
+ * 按 F12 看不到答案。作答秒數由網頁端回報,懂技術的人可以竄改。
  */
 
 // 作答結果會寫進這個工作表,不存在時會自動建立
@@ -66,8 +66,11 @@ function doGet() {
 
 /**
  * 作答流程:
- *   { action: 'start', name }                        → 開始,回傳第一題
- *   { action: 'answer', session, step, pick, left }  → 交這一題,回傳下一題或最終成績
+ *   { action: 'begin' }                       → 建立 session,回傳全部題目(不含正解)
+ *   { action: 'check', name, session }        → 查名字有沒有用過
+ *   { action: 'claim', session, name }        → 按下開始作答,認領這個 session
+ *   { action: 'submit', session, name, picks } → 交卷,回傳成績
+ * 舊版前端用的 'start' / 'answer'(逐題發題)仍然保留。
  */
 function doPost(e) {
   try {
