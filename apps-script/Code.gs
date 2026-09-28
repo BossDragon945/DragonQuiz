@@ -47,6 +47,7 @@ function doGet() {
     var same = limits.every(function (s) { return s === limits[0]; });
     return jsonOut_({
       ok: true,
+      type: 'info',
       message: '測驗接收端運作中',
       total: questions.length,
       timeLimit: same ? limits[0] : null
@@ -93,6 +94,7 @@ function begin_(data) {
 
   return {
     ok: true,
+    type: 'begin',
     session: sess.id,
     total: sess.order.length,
     questions: sess.order.map(function (qi) {
@@ -245,6 +247,7 @@ function issue_(sess) {
   var remaining = Math.max(0, q.limit * 1000 - (Date.now() - sess.sentAt));
   return {
     ok: true,
+    type: 'question',
     session: sess.id,
     total: sess.order.length,
     step: sess.step,
@@ -291,7 +294,7 @@ function finish_(sess) {
     }
   });
 
-  var res = { ok: true, done: true, score: score, total: total, percent: percent, leaves: leaves, timeouts: timeouts };
+  var res = { ok: true, type: 'result', done: true, score: score, total: total, percent: percent, leaves: leaves, timeouts: timeouts };
   if (SHOW_ANSWERS) res.review = review;
 
   sess.final = res;

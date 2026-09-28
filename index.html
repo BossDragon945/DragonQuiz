@@ -317,8 +317,23 @@
     // Apps Script 偶爾會回 404 或直接斷線,尤其在短時間內被連續呼叫時。
     // 這類故障跟請求內容無關,重送一次通常就好。
     function isTransient(err) {
+      if (err && err.transient) return true;
       var m = String(err && err.message || "");
       return /^HTTP (404|429|5\d\d)$/.test(m) || /Failed to fetch|NetworkError|Load failed/i.test(m);
+    }
+
+    // POST 的結果要經過一次 302 轉址才拿得到。那個轉址失效時,Google 會改用
+    // GET 重跑腳本、回傳 doGet 的輸出 —— 它長得像成功(ok:true)但內容完全
+    // 不是你要的。靠 type 欄位辨識出來,當成暫時性故障重試。
+    var EXPECT = { begin: ["begin"], submit: ["result"], answer: ["question", "result"] };
+    function checkType(payload, res) {
+      var want = EXPECT[payload.action];
+      if (want && want.indexOf(res.type) === -1) {
+        var e = new Error("伺服器回應不是這次請求的結果");
+        e.transient = true;
+        throw e;
+      }
+      return res;
     }
 
     // submit 在伺服器端是冪等的(已交卷的 session 會直接回傳先前成績,不重複計分),
@@ -354,7 +369,7 @@
             e.code = res && res.code;
             throw e;
           }
-          return res;
+          return checkType(payload, res);
         });
     }
 
@@ -433,6 +448,14 @@
           .then(function (r) {
             if (!r.ok) throw new Error("HTTP " + r.status);
             return r.json();
+          })
+          .then(function (res) {
+            if (res && res.ok !== false && res.type !== "info") {
+              var e = new Error("伺服器回應不是這次請求的結果");
+              e.transient = true;
+              throw e;
+            }
+            return res;
           })
           .catch(function (err) {
             if (tries >= 3 || !isTransient(err)) throw err;
