@@ -69,9 +69,7 @@ function doGet() {
  *   { action: 'begin' }                       → 建立 session,回傳全部題目(不含正解)
  *   { action: 'check', name, session }        → 查名字有沒有用過
  *   { action: 'claim', session, name }        → 按下開始作答,認領這個 session
- *   { action: 'submit', session, name, picks } → 交卷,回傳成績
- * 舊版前端用的 'start' / 'answer'(逐題發題)仍然保留。
- */
+ *   { action: 'submit', session, name, picks } → 交卷,回傳成績 */
 function doPost(e) {
   try {
     if (!e || !e.postData || !e.postData.contents) {
@@ -82,8 +80,6 @@ function doPost(e) {
     if (data.action === 'check') return jsonOut_(check_(data));
     if (data.action === 'claim') return jsonOut_(claim_(data));
     if (data.action === 'submit') return jsonOut_(submit_(data));
-    if (data.action === 'start') return jsonOut_(start_(data));
-    if (data.action === 'answer') return jsonOut_(answer_(data));
     return jsonOut_({ ok: false, error: '不明的操作' });
   } catch (err) {
     return jsonOut_({ ok: false, error: errMsg_(err) });
@@ -91,7 +87,7 @@ function doPost(e) {
 }
 
 
-/* ---------------- 一次發題流程(目前前端使用)---------------- */
+/* ---------------- 作答流程 ---------------- */
 
 /**
  * 開始作答:一次回傳全部題目,但**不含正解**。
@@ -234,16 +230,8 @@ function submit_(data) {
     sess.results[qi] = { pick: pick, status: status, secs: Math.round(secs * 10) / 10 };
   });
 
-  sess.step = sess.order.length;
   // 姓名的權威檢查併進 finish_ 的那把鎖裡做,省下一次取鎖與一次開表
-  return finish_(sess, true);
-}
-
-
-/* ---------------- 逐題發題流程(舊版前端用,保留相容)---------------- */
-
-function start_(data) {
-  return issue_(newSession_(data));
+  return finish_(sess);
 }
 
 
@@ -266,8 +254,6 @@ function newSession_(data) {
     name: name,
     startedAt: Date.now(),
     order: order,
-    step: 0,
-    sentAt: 0,
     results: [],
     questions: questions.map(function (q) {
       var perm = range_(q.options.length);
@@ -387,70 +373,7 @@ function findRow_(sheet, sess) {
 }
 
 
-function answer_(data) {
-  var sess = loadSession_(data.session);
-  if (!sess) return { ok: false, code: 'EXPIRED', error: '這次作答已失效,請重新開始' };
-  if (sess.final) return sess.final;
-
-  // 重送(例如網路斷掉後按重試):這題已經收過了,直接回傳目前狀態
-  if (data.step !== sess.step) return issue_(sess);
-
-  var qi = sess.order[sess.step];
-  var q = sess.questions[qi];
-  var elapsed = Date.now() - sess.sentAt;
-  var p = data.pick;
-  var valid = typeof p === 'number' && p % 1 === 0 && p >= 0 && p < q.options.length;
-
-  var status, pick = null;
-  if (data.left) {
-    status = 'left';
-  } else if (!valid || elapsed > (q.limit + GRACE_SECONDS) * 1000) {
-    status = 'timeout';
-  } else {
-    pick = q.perm[p];
-    status = pick === q.answer ? 'ok' : 'wrong';
-  }
-
-  sess.results[qi] = {
-    pick: pick,
-    status: status,
-    secs: Math.round(Math.min(elapsed, (q.limit + GRACE_SECONDS) * 1000) / 100) / 10
-  };
-  sess.step++;
-  sess.sentAt = 0;
-  return issue_(sess);
-}
-
-
-/**
- * 發出目前這一題。重新要同一題時,剩餘時間照伺服器的時鐘算,
- * 所以重新整理或重送都不會讓時間重來。
- */
-function issue_(sess) {
-  if (sess.step >= sess.order.length) return finish_(sess);
-
-  if (!sess.sentAt) sess.sentAt = Date.now();
-  saveSession_(sess);
-
-  var q = sess.questions[sess.order[sess.step]];
-  var remaining = Math.max(0, q.limit * 1000 - (Date.now() - sess.sentAt));
-  return {
-    ok: true,
-    type: 'question',
-    session: sess.id,
-    total: sess.order.length,
-    step: sess.step,
-    question: {
-      q: q.q,
-      options: q.perm.map(function (i) { return q.options[i]; }),
-      limit: q.limit,
-      remaining: remaining / 1000
-    }
-  };
-}
-
-
-function finish_(sess, checkDup) {
+function finish_(sess) {
   var total = sess.questions.length;
   var score = 0, leaves = 0, timeouts = 0;
   var cells = [];
@@ -474,7 +397,7 @@ function finish_(sess, checkDup) {
     var sheet = getSheet_();
 
     // 權威的姓名檢查。跟寫入放在同一把鎖裡,省下獨立取鎖與再開一次表
-    if (checkDup && nameTaken_(sheet, sess.name, sess.code)) return true;
+    if (nameTaken_(sheet, sess.name, sess.code)) return true;
 
     // begin 已經依題數補好標題與欄位了,列號還在就不必再檢查一次
     if (!sess.row) ensureHeader_(sheet, total);

@@ -353,7 +353,7 @@
     // POST 的結果要經過一次 302 轉址才拿得到。那個轉址失效時,Google 會改用
     // GET 重跑腳本、回傳 doGet 的輸出 —— 它長得像成功(ok:true)但內容完全
     // 不是你要的。靠 type 欄位辨識出來,當成暫時性故障重試。
-    var EXPECT = { begin: ["begin"], check: ["check"], claim: ["claim"], submit: ["result"], answer: ["question", "result"] };
+    var EXPECT = { begin: ["begin"], check: ["check"], claim: ["claim"], submit: ["result"] };
     function checkType(payload, res) {
       var want = EXPECT[payload.action];
       if (want && want.indexOf(res.type) === -1) {
