@@ -310,6 +310,29 @@
     }
 
     /* ---------- 與 Apps Script 溝通 ---------- */
+
+    // Apps Script 偶爾會回 404 或直接斷線,尤其在短時間內被連續呼叫時。
+    // 這類故障跟請求內容無關,重送一次通常就好。
+    function isTransient(err) {
+      var m = String(err && err.message || "");
+      return /^HTTP (404|429|5\d\d)$/.test(m) || /Failed to fetch|NetworkError|Load failed/i.test(m);
+    }
+
+    // answer 在伺服器端是冪等的(Code.gs 收到重複的 step 會直接回傳目前狀態),
+    // 所以重送安全。start 會產生新 session 與新的一列紀錄,不能自動重送。
+    function postWithRetry(payload, tries) {
+      tries = tries || 0;
+      return post(payload).catch(function (err) {
+        var canRetry = payload.action === "answer" && tries < 3 && isTransient(err);
+        if (!canRetry) throw err;
+        return new Promise(function (resolve) {
+          setTimeout(resolve, 800 * Math.pow(2, tries));   // 0.8s → 1.6s → 3.2s
+        }).then(function () {
+          return postWithRetry(payload, tries + 1);
+        });
+      });
+    }
+
     function post(payload) {
       // 用 text/plain 送出,避開 CORS 預檢請求(Apps Script 不處理 OPTIONS)
       return fetch(apiUrl, {
@@ -339,7 +362,7 @@
       $("btn-retry").classList.add("hidden");
       $("btn-restart").classList.add("hidden");
 
-      post(payload)
+      postWithRetry(payload)
         .then(function (res) {
           busy = false;
           pending = null;
@@ -351,7 +374,8 @@
         .catch(function (err) {
           busy = false;
           $("qloading").classList.add("hidden");
-          setStatus("err", "連線失敗:" + err.message);
+          // 後端回報的邏輯錯誤(例如題庫格式有問題)不是連線失敗,別誤導
+          setStatus("err", (isTransient(err) ? "連線失敗:" : "") + err.message);
           if (err.code === "EXPIRED") $("btn-restart").classList.remove("hidden");
           else $("btn-retry").classList.remove("hidden");
         });
@@ -389,11 +413,22 @@
           '還在連線中…<span class="hint">已經等了一段時間,若超過 30 秒仍無反應,請重新整理頁面</span>';
       }, 12000));
 
-      fetch(apiUrl, { cache: "no-store" })
-        .then(function (r) {
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          return r.json();
-        })
+      // GET 是唯讀的,重試絕對安全
+      function loadInfo(tries) {
+        return fetch(apiUrl, { cache: "no-store" })
+          .then(function (r) {
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return r.json();
+          })
+          .catch(function (err) {
+            if (tries >= 3 || !isTransient(err)) throw err;
+            return new Promise(function (resolve) {
+              setTimeout(resolve, 800 * Math.pow(2, tries));
+            }).then(function () { return loadInfo(tries + 1); });
+          });
+      }
+
+      loadInfo(0)
         .then(function (res) {
           stopLoading();
           if (!res || res.ok === false) throw new Error((res && res.error) || "伺服器回報失敗");
