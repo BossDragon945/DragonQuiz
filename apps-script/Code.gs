@@ -200,15 +200,6 @@ function submit_(data) {
   // claim 可能失敗或根本沒送到,交卷時的名字才是最終依據
   if (data.name) sess.name = cleanName_(data.name);
 
-  // 權威檢查:前端的擋人可以被繞過,這裡才是真正算數的地方
-  var dup = withLock_(function () {
-    return nameTaken_(getSheet_(), sess.name, sess.code);
-  });
-  if (dup) {
-    return { ok: false, code: 'TAKEN',
-             error: '「' + sess.name + '」已經作答過了,這次成績不列入' };
-  }
-
   var picks = data.picks || [];
   sess.results = [];
 
@@ -241,7 +232,8 @@ function submit_(data) {
   });
 
   sess.step = sess.order.length;
-  return finish_(sess);
+  // 姓名的權威檢查併進 finish_ 的那把鎖裡做,省下一次取鎖與一次開表
+  return finish_(sess, true);
 }
 
 
@@ -455,7 +447,7 @@ function issue_(sess) {
 }
 
 
-function finish_(sess) {
+function finish_(sess, checkDup) {
   var total = sess.questions.length;
   var score = 0, leaves = 0, timeouts = 0;
   var cells = [];
@@ -475,13 +467,25 @@ function finish_(sess) {
   var row = [new Date(sess.startedAt), sess.code, sess.name, '完成', score, total, percent / 100, leaves, timeouts]
     .concat(cells);
 
-  withLock_(function () {
+  var dup = withLock_(function () {
     var sheet = getSheet_();
-    ensureHeader_(sheet, total);
+
+    // 權威的姓名檢查。跟寫入放在同一把鎖裡,省下獨立取鎖與再開一次表
+    if (checkDup && nameTaken_(sheet, sess.name, sess.code)) return true;
+
+    // begin 已經依題數補好標題與欄位了,列號還在就不必再檢查一次
+    if (!sess.row) ensureHeader_(sheet, total);
+
     var at = findRow_(sheet, sess);
     if (at) sheet.getRange(at, 1, 1, row.length).setValues([row]);
     else sheet.appendRow(row);
+    return false;
   });
+
+  if (dup) {
+    return { ok: false, code: 'TAKEN',
+             error: '「' + sess.name + '」已經作答過了,這次成績不列入' };
+  }
 
   var res = { ok: true, type: 'result', done: true, score: score, total: total, percent: percent, leaves: leaves, timeouts: timeouts };
   if (SHOW_ANSWERS) res.review = review;
