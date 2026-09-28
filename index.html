@@ -238,11 +238,12 @@
         <button class="btn" id="btn-start">開始作答</button>
       </section>
 
-      <!-- ======== 畫面 4:已經作答過 ======== -->
+      <!-- ======== 畫面 4:通知(已作答過 / 非活動時間)======== -->
       <section id="screen-used" class="hidden">
         <div class="loading">
-          <p style="font-size:2.6rem;margin:0 0 10px">🔒</p>
+          <p id="used-icon" style="font-size:2.6rem;margin:0 0 10px">🔒</p>
           <p id="used-text">你已經作答過了,每個人只能作答一次。</p>
+          <p id="used-detail" class="name-msg hidden" style="margin-top:10px"></p>
         </div>
       </section>
 
@@ -395,6 +396,7 @@
           if (!res || res.ok === false) {
             var e = new Error((res && res.error) || "伺服器回報失敗");
             e.code = res && res.code;
+            e.detail = res && res.detail;
             throw e;
           }
           return checkType(payload, res);
@@ -433,9 +435,11 @@
           $("qloading").classList.add("hidden");
 
           if (err.code === "TAKEN") {          // 伺服器的權威判定:這個名字已經用過
-            stopTimer();
-            $("used-text").textContent = err.message;
-            show("screen-used");
+            notice("🔒", err.message);
+            return;
+          }
+          if (err.code === "CLOSED") {
+            notice("🕒", err.message, err.detail);
             return;
           }
 
@@ -463,12 +467,23 @@
       show(null);
     }
 
+    // 通知畫面:已經作答過、或不在活動時間內
+    function notice(icon, text, detail) {
+      stopLoading();
+      stopTimer();
+      question = null;
+      $("used-icon").textContent = icon;
+      $("used-text").textContent = text;
+      $("used-detail").textContent = detail || "";
+      $("used-detail").classList.toggle("hidden", !detail);
+      show("screen-used");
+    }
+
     if (!apiUrl) {
       loadFail("尚未設定 appsScriptUrl(見 README)");
     } else if (alreadyDone()) {
       // 這台瀏覽器這一場已經作答過,連題目都不抓
-      stopLoading();
-      show("screen-used");
+      notice("🔒", "你已經作答過了,每個人只能作答一次。");
     } else {
       // Apps Script 閒置後會休眠,冷啟動實測約 10 秒。沒有提示的話
       // 使用者只會看到一張空卡片,會以為壞掉。
@@ -508,6 +523,10 @@
           show("screen-start");
         })
         .catch(function (err) {
+          if (err && err.code === "CLOSED") {
+            notice("🕒", err.message, err.detail);
+            return;
+          }
           loadFail(err.message);
         });
     }
@@ -584,12 +603,9 @@
       // 萬一伺服器回報名字已被用掉(前端沒攔到的競態),直接擋下。
       postWithRetry({ action: "claim", session: session, name: playerName || "(未具名)" })
         .catch(function (err) {
-          if (err && err.code === "TAKEN") {
-            stopTimer();
-            question = null;
-            $("used-text").textContent = err.message;
-            show("screen-used");
-          }
+          if (!err) return;
+          if (err.code === "TAKEN") notice("🔒", err.message);
+          else if (err.code === "CLOSED") notice("🕒", err.message, err.detail);
         });
 
       renderQuestion(0);
