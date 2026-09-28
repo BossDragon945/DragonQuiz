@@ -19,7 +19,7 @@ const QUIZ_CONFIG = {
   // 題目、答案與計分都在 Apps Script 那邊,沒填網址就無法作答。
   // 詳細步驟見 README.md
   // ------------------------------------------------------------
-  appsScriptUrl: "",
+  appsScriptUrl: "https://script.google.com/macros/s/AKfycbyjvZrdB8cCULE4jIGom62n8uVJS3E0c0UbXfZr4Yz2_de-4MR4_lB-wf_ZqMpWmdTs/exec",
 
   // 作答前是否要求輸入姓名
   requireName: true,
