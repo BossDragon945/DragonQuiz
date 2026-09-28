@@ -70,6 +70,7 @@ function doPost(e) {
     }
     var data = JSON.parse(e.postData.contents);
     if (data.action === 'begin') return jsonOut_(begin_(data));
+    if (data.action === 'check') return jsonOut_(check_(data));
     if (data.action === 'claim') return jsonOut_(claim_(data));
     if (data.action === 'submit') return jsonOut_(submit_(data));
     if (data.action === 'start') return jsonOut_(start_(data));
@@ -111,6 +112,39 @@ function begin_(data) {
 
 
 /**
+ * 查名字有沒有用過。使用者在輸入名字時就會先問一次,
+ * 所以按下「開始作答」的當下不必等網路。
+ */
+function check_(data) {
+  var name = cleanName_(data.name);
+  var taken = withLock_(function () {
+    return nameTaken_(getSheet_(), name, data.session || '');
+  });
+  return { ok: true, type: 'check', name: name, taken: taken };
+}
+
+
+/**
+ * 這個名字是否已經開始作答過(不論有沒有交卷)。
+ *
+ * 只要留下過紀錄就算用掉機會 —— 中途關掉頁面也一樣,否則看到難題
+ * 就關掉重來會變成合法的規避手段。ownCode 是這次作答自己的編號,
+ * 要排除掉,不然會擋到自己。
+ */
+function nameTaken_(sheet, name, ownCode) {
+  var last = sheet.getLastRow();
+  if (last < 2) return false;
+
+  // B=作答編號, C=姓名, D=狀態
+  var vals = sheet.getRange(2, 2, last - 1, 3).getDisplayValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (vals[i][1] === name && vals[i][0] !== ownCode) return true;
+  }
+  return false;
+}
+
+
+/**
  * 認領:使用者真的按下「開始作答」時呼叫,把名字補上。
  *
  * 題目是在頁面載入時就先抓好的(為了讓開始作答沒有等待),那時還不知道
@@ -123,15 +157,21 @@ function claim_(data) {
   var sess = loadSession_(data.session);
   if (!sess) return { ok: false, code: 'EXPIRED', error: '這次作答已失效,請重新開始' };
 
-  sess.name = cleanName_(data.name);
-  saveSession_(sess);
+  var name = cleanName_(data.name);
 
-  withLock_(function () {
+  // 查名字和寫入放在同一個鎖裡,兩個人同時按開始才不會都通過
+  var taken = withLock_(function () {
     var sheet = getSheet_();
+    if (nameTaken_(sheet, name, sess.code)) return true;
     var row = findRow_(sheet, sess);
-    if (row) sheet.getRange(row, 3, 1, 2).setValues([[sess.name, '作答中']]);
+    if (row) sheet.getRange(row, 3, 1, 2).setValues([[name, '作答中']]);
+    return false;
   });
 
+  if (taken) return { ok: false, code: 'TAKEN', error: '「' + name + '」已經作答過了' };
+
+  sess.name = name;
+  saveSession_(sess);
   return { ok: true, type: 'claim' };
 }
 
@@ -147,6 +187,15 @@ function submit_(data) {
 
   // claim 可能失敗或根本沒送到,交卷時的名字才是最終依據
   if (data.name) sess.name = cleanName_(data.name);
+
+  // 權威檢查:前端的擋人可以被繞過,這裡才是真正算數的地方
+  var dup = withLock_(function () {
+    return nameTaken_(getSheet_(), sess.name, sess.code);
+  });
+  if (dup) {
+    return { ok: false, code: 'TAKEN',
+             error: '「' + sess.name + '」已經作答過了,這次成績不列入' };
+  }
 
   var picks = data.picks || [];
   sess.results = [];

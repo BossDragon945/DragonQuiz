@@ -189,6 +189,10 @@
     #loading-text { margin: 0; color: rgba(245,230,211,.72); font-size: .95rem; }
     #loading-text .hint { display: block; margin-top: 8px; font-size: .85rem; color: rgba(245,230,211,.5); }
 
+    .name-msg { margin: 8px 0 0; font-size: .88rem; }
+    .name-msg.bad { color: #ff9e9e; }
+    .name-msg.checking { color: rgba(245,230,211,.5); }
+
     .hidden { display: none !important; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -228,9 +232,18 @@
         <div id="name-block">
           <label class="field" for="player">你的名字</label>
           <input type="text" id="player" maxlength="20" autocomplete="name" placeholder="請輸入名字">
+          <p id="name-msg" class="name-msg hidden" role="status"></p>
         </div>
         <ul class="rules" id="rules"></ul>
         <button class="btn" id="btn-start">開始作答</button>
+      </section>
+
+      <!-- ======== 畫面 4:已經作答過 ======== -->
+      <section id="screen-used" class="hidden">
+        <div class="loading">
+          <p style="font-size:2.6rem;margin:0 0 10px">🔒</p>
+          <p id="used-text">你已經作答過了,每個人只能作答一次。</p>
+        </div>
       </section>
 
       <!-- ======== 畫面 2:作答 ======== -->
@@ -262,7 +275,7 @@
         <p class="subtitle" style="margin:8px 0 0" id="score-note"></p>
         <div class="status ok">結果已記錄 ✓</div>
         <div class="review" id="review"></div>
-        <button class="btn secondary" id="btn-again" style="margin-top:24px">再作答一次</button>
+        <p class="name-msg" style="text-align:center;margin-top:24px">每個人只能作答一次,感謝參加 🐲</p>
       </section>
     </div>
   </div>
@@ -291,11 +304,24 @@
     var deadline = 0;
     var startedAt = 0;     // 這一題開始作答的時間,用來算作答秒數
     var timerId = null;
+    var nameOk = null;     // 名字查詢結果:true 可用 / false 已用過 / null 還沒查
+    var nameTimer = null;
+    var checking = null;   // 進行中的查詢 Promise
+
+    /* ---------- 只能作答一次:瀏覽器這一側 ---------- */
+    var DONE_KEY = "dragonquiz.done." + (QUIZ_CONFIG.round || "1");
+
+    function markDone() {
+      try { localStorage.setItem(DONE_KEY, String(Date.now())); } catch (e) { /* 無痕模式會擋 */ }
+    }
+    function alreadyDone() {
+      try { return !!localStorage.getItem(DONE_KEY); } catch (e) { return false; }
+    }
     var playerName = "";
 
     var $ = function (id) { return document.getElementById(id); };
     function show(id) {
-      ["screen-loading", "screen-start", "screen-quiz", "screen-result"].forEach(function (s) {
+      ["screen-loading", "screen-start", "screen-quiz", "screen-result", "screen-used"].forEach(function (s) {
         $(s).classList.toggle("hidden", s !== id);
       });
     }
@@ -325,7 +351,7 @@
     // POST 的結果要經過一次 302 轉址才拿得到。那個轉址失效時,Google 會改用
     // GET 重跑腳本、回傳 doGet 的輸出 —— 它長得像成功(ok:true)但內容完全
     // 不是你要的。靠 type 欄位辨識出來,當成暫時性故障重試。
-    var EXPECT = { begin: ["begin"], claim: ["claim"], submit: ["result"], answer: ["question", "result"] };
+    var EXPECT = { begin: ["begin"], check: ["check"], claim: ["claim"], submit: ["result"], answer: ["question", "result"] };
     function checkType(payload, res) {
       var want = EXPECT[payload.action];
       if (want && want.indexOf(res.type) === -1) {
@@ -340,7 +366,7 @@
     // 所以重送安全。begin 會產生新 session 與新的一列紀錄,不能自動重送。
     // begin 失敗重送會在試算表多留一列「(未開始)」,但那跟「開了頁面就離開」
     // 長得一樣、不會被誤判成作答紀錄,所以為了載入可靠性還是允許重試。
-    var RETRYABLE = { begin: true, submit: true, answer: true };
+    var RETRYABLE = { begin: true, check: true, submit: true, answer: true };
     function postWithRetry(payload, tries) {
       tries = tries || 0;
       return post(payload).catch(function (err) {
@@ -405,6 +431,14 @@
         .catch(function (err) {
           busy = false;
           $("qloading").classList.add("hidden");
+
+          if (err.code === "TAKEN") {          // 伺服器的權威判定:這個名字已經用過
+            stopTimer();
+            $("used-text").textContent = err.message;
+            show("screen-used");
+            return;
+          }
+
           // 後端回報的邏輯錯誤(例如題庫格式有問題)不是連線失敗,別誤導
           setStatus("err", (isTransient(err) ? "連線失敗:" : "") + err.message);
           if (err.code === "EXPIRED") $("btn-restart").classList.remove("hidden");
@@ -431,6 +465,10 @@
 
     if (!apiUrl) {
       loadFail("尚未設定 appsScriptUrl(見 README)");
+    } else if (alreadyDone()) {
+      // 這台瀏覽器這一場已經作答過,連題目都不抓
+      stopLoading();
+      show("screen-used");
     } else {
       // Apps Script 閒置後會休眠,冷啟動實測約 10 秒。沒有提示的話
       // 使用者只會看到一張空卡片,會以為壞掉。
@@ -474,14 +512,62 @@
         });
     }
 
+    /* ---------- 名字查詢:打字時就先問,按下開始才不用等 ---------- */
+    function setNameMsg(kind, text) {
+      var el = $("name-msg");
+      el.className = "name-msg " + kind + (text ? "" : " hidden");
+      el.textContent = text || "";
+    }
+
+    function runCheck(name) {
+      setNameMsg("checking", "確認中…");
+      checking = postWithRetry({ action: "check", session: session, name: name })
+        .then(function (res) {
+          if ($("player").value.trim() !== name) return;   // 名字又改了,這次結果作廢
+          nameOk = !res.taken;
+          setNameMsg(res.taken ? "bad" : "",
+                     res.taken ? "「" + name + "」已經作答過了,每個人只能作答一次" : "");
+          $("btn-start").disabled = !!res.taken;
+        })
+        .catch(function () {
+          // 查詢失敗就先放行 —— 交卷時伺服器還會再擋一次,不會漏掉
+          nameOk = null;
+          setNameMsg("", "");
+          $("btn-start").disabled = false;
+        })
+        .then(function () { checking = null; });
+      return checking;
+    }
+
+    $("player").addEventListener("input", function () {
+      nameOk = null;
+      $("btn-start").disabled = false;
+      setNameMsg("", "");
+      clearTimeout(nameTimer);
+      var v = this.value.trim();
+      if (!v) return;
+      nameTimer = setTimeout(function () { runCheck(v); }, 600);
+    });
+
     /* ---------- 開始 ---------- */
     $("btn-start").addEventListener("click", function () {
-      if (QUIZ_CONFIG.requireName) {
-        playerName = $("player").value.trim();
-        if (!playerName) { $("player").focus(); return; }
-      } else {
-        playerName = "";
+      if (!QUIZ_CONFIG.requireName) { playerName = ""; beginQuiz(); return; }
+
+      playerName = $("player").value.trim();
+      if (!playerName) { $("player").focus(); return; }
+      if (nameOk === false) return;                        // 已知用過,不放行
+
+      if (nameOk === null) {                               // 還沒查完:等查完再決定
+        clearTimeout(nameTimer);
+        (checking || runCheck(playerName)).then(function () {
+          if (nameOk !== false) beginQuiz();
+        });
+        return;
       }
+      beginQuiz();
+    });
+
+    function beginQuiz() {
       // 題目已經在頁面載入時抓好了,這裡不需要任何網路等待
       question = null;
       picks = [];
@@ -491,13 +577,23 @@
       setStatus("", "");
       show("screen-quiz");
 
-      // 把名字補回試算表那列。刻意不等結果 —— 等於是背景作業,
-      // 失敗也沒關係,交卷時會再帶一次名字。
+      // 按下開始就算用掉機會,所以這裡就記下,不是等交卷才記
+      markDone();
+
+      // 把名字補回試算表那列。刻意不等結果 —— 等於背景作業。
+      // 萬一伺服器回報名字已被用掉(前端沒攔到的競態),直接擋下。
       postWithRetry({ action: "claim", session: session, name: playerName || "(未具名)" })
-        .catch(function () { /* best effort */ });
+        .catch(function (err) {
+          if (err && err.code === "TAKEN") {
+            stopTimer();
+            question = null;
+            $("used-text").textContent = err.message;
+            show("screen-used");
+          }
+        });
 
       renderQuestion(0);
-    });
+    }
 
     /* ---------- 作答畫面 ---------- */
     function renderQuestion(s) {
@@ -666,9 +762,6 @@
       show("screen-result");
     }
 
-    $("btn-again").addEventListener("click", function () {
-      restart();
-    });
   })();
   </script>
 </body>
