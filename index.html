@@ -177,6 +177,22 @@
 
     .hidden { display: none !important; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+    /* ---------- 計時 ---------- */
+    .timer { display: flex; justify-content: space-between; align-items: baseline; font-size: .85rem; color: rgba(245,230,211,.6); margin-bottom: 6px; }
+    .timer b { font-size: 1.15rem; color: var(--gold-light); font-variant-numeric: tabular-nums; }
+    .timer.urgent b { color: #ff8a80; }
+    .tbar { margin-bottom: 22px; }
+    .tbar > i { transition: none; }
+    .timer.urgent + .tbar > i { background: linear-gradient(90deg, #7A1F1F, #ff8a80); }
+
+    /* 作答中不能選取、複製題目文字 */
+    #screen-quiz { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+    .rules { margin: 18px 0 0; padding: 14px 16px 14px 34px; background: rgba(0,0,0,.2); border-radius: 9px; font-size: .9rem; color: rgba(245,230,211,.78); }
+    .rules li { margin: 2px 0; }
+    .loading { text-align: center; color: rgba(245,230,211,.6); padding: 40px 0; }
+    .tag.warn { background: #6b5a2e; color: #fff; }
   </style>
 </head>
 <body>
@@ -191,8 +207,8 @@
           <label class="field" for="player">你的名字</label>
           <input type="text" id="player" maxlength="20" autocomplete="name" placeholder="請輸入名字">
         </div>
+        <ul class="rules" id="rules"></ul>
         <button class="btn" id="btn-start">開始作答</button>
-        <p class="subtitle" style="margin:16px 0 0;font-size:.85rem" id="qcount"></p>
       </section>
 
       <!-- ======== 畫面 2:作答 ======== -->
@@ -202,20 +218,27 @@
         </div>
         <div class="bar"><i id="pbar" style="width:0%"></i></div>
 
-        <h2 class="qtext" id="qtext"></h2>
-        <div id="opts" role="radiogroup" aria-labelledby="qtext"></div>
+        <div id="qbox" class="hidden">
+          <div class="timer" id="timer"><span>剩餘時間</span><b id="tleft"></b></div>
+          <div class="bar tbar"><i id="tbar" style="width:100%"></i></div>
 
-        <div class="btn-row" style="margin-top:22px">
-          <button class="btn secondary" id="btn-prev">上一題</button>
-          <button class="btn" id="btn-next" disabled>下一題</button>
+          <h2 class="qtext" id="qtext"></h2>
+          <div id="opts" role="radiogroup" aria-labelledby="qtext"></div>
+
+          <button class="btn" id="btn-next" disabled>確定</button>
         </div>
+
+        <div class="loading hidden" id="qloading">載入中…</div>
+        <div id="qstatus" class="status hidden"></div>
+        <button class="btn hidden" id="btn-retry">重試</button>
+        <button class="btn secondary hidden" id="btn-restart">重新開始</button>
       </section>
 
       <!-- ======== 畫面 3:結果 ======== -->
       <section id="screen-result" class="hidden">
         <div class="score" id="score"></div>
-        <div id="status" class="status pending">計分中…</div>
-        <button class="btn hidden" id="btn-retry">重新送出</button>
+        <p class="subtitle" style="margin:8px 0 0" id="score-note"></p>
+        <div class="status ok">結果已記錄 ✓</div>
         <div class="review" id="review"></div>
         <button class="btn secondary" id="btn-again" style="margin-top:24px">再作答一次</button>
       </section>
@@ -227,13 +250,23 @@
   (function () {
     "use strict";
 
+    // 題目、答案、計時、計分都在 Apps Script 那邊。
+    // 這裡一次只拿得到一題,倒數也只是顯示用:逾時與否由伺服器的時鐘決定。
+
     var LETTERS = ["A", "B", "C", "D", "E", "F"];
-    var questions = [];
-    var answers = [];      // 每題選了第幾個,未作答為 null
-    var current = 0;
-    var playerName = "";
-    var submitting = false;
+    var STATUS_TEXT = { ok: "答對", wrong: "答錯", timeout: "逾時", left: "離開畫面" };
     var apiUrl = (QUIZ_CONFIG.appsScriptUrl || "").trim();
+
+    var session = null;
+    var total = 0;
+    var step = 0;
+    var question = null;   // 目前顯示中、還沒交的題目
+    var picked = null;
+    var busy = false;
+    var pending = null;    // 送出失敗時,重試用的內容
+    var deadline = 0;
+    var timerId = null;
+    var playerName = "";
 
     var $ = function (id) { return document.getElementById(id); };
     function show(id) {
@@ -242,171 +275,22 @@
       });
     }
 
-    /* ---------- 載入題庫 ---------- */
-    // 題庫放在 Apps Script 那邊,這裡只拿得到題目和選項,拿不到答案
-    $("title").textContent = QUIZ_CONFIG.title || "線上測驗";
-    $("subtitle").textContent = QUIZ_CONFIG.subtitle || "";
-    document.title = QUIZ_CONFIG.title || document.title;
-
-    function loadFail(msg) {
-      $("title").textContent = "題庫載入失敗";
-      $("subtitle").textContent = msg;
-    }
-
-    if (!apiUrl) {
-      loadFail("尚未設定 appsScriptUrl(見 README)");
-    } else {
-      fetch(apiUrl, { cache: "no-store" })
-        .then(function (r) {
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          return r.json();
-        })
-        .then(function (res) {
-          if (!res || res.ok === false) throw new Error((res && res.error) || "伺服器回報失敗");
-          var data = res.questions;
-          if (!Array.isArray(data) || data.length === 0) throw new Error("題庫是空的");
-          questions = data;
-          answers = new Array(data.length).fill(null);
-          $("qcount").textContent = "共 " + data.length + " 題";
-          if (!QUIZ_CONFIG.requireName) $("name-block").classList.add("hidden");
-          show("screen-start");
-        })
-        .catch(function (err) {
-          loadFail(err.message);
-        });
-    }
-
-    /* ---------- 開始 ---------- */
-    $("btn-start").addEventListener("click", function () {
-      if (QUIZ_CONFIG.requireName) {
-        playerName = $("player").value.trim();
-        if (!playerName) { $("player").focus(); return; }
-      } else {
-        playerName = "(未具名)";
-      }
-      current = 0;
-      answers.fill(null);
-      $("pname").textContent = playerName;
-      renderQuestion();
-      show("screen-quiz");
-    });
-
-    /* ---------- 作答畫面 ---------- */
-    function renderQuestion() {
-      var q = questions[current];
-      $("pmeta").textContent = "第 " + (current + 1) + " / " + questions.length + " 題";
-      $("pbar").style.width = ((current) / questions.length * 100) + "%";
-      $("qtext").textContent = q.q;
-
-      var box = $("opts");
-      box.innerHTML = "";
-      q.options.forEach(function (text, i) {
-        var label = document.createElement("label");
-        label.className = "opt";
-
-        var input = document.createElement("input");
-        input.type = "radio";
-        input.name = "q" + current;
-        input.value = String(i);
-        input.checked = answers[current] === i;
-        input.addEventListener("change", function () {
-          answers[current] = i;
-          $("btn-next").disabled = false;
-        });
-
-        var span = document.createElement("span");
-        span.setAttribute("data-letter", LETTERS[i] || (i + 1));
-        span.appendChild(document.createTextNode(text));
-
-        label.appendChild(input);
-        label.appendChild(span);
-        box.appendChild(label);
-      });
-
-      $("btn-prev").disabled = current === 0;
-      $("btn-next").disabled = answers[current] === null;
-      $("btn-next").textContent = current === questions.length - 1 ? "看結果" : "下一題";
-    }
-
-    $("btn-prev").addEventListener("click", function () {
-      if (current > 0) { current--; renderQuestion(); }
-    });
-
-    $("btn-next").addEventListener("click", function () {
-      if (answers[current] === null) return;
-      if (current < questions.length - 1) { current++; renderQuestion(); }
-      else finish();
-    });
-
-    /* ---------- 結果 ---------- */
-    // 分數和正解都由 Apps Script 算好回傳,這裡只負責顯示
-    function finish() {
-      $("score").innerHTML = "";
-      $("review").innerHTML = "";
-      show("screen-result");
-      submitResult();
-    }
-
-    function renderResult(res) {
-      $("score").innerHTML = res.score + " / " + res.total +
-        "<small>答對率 " + res.percent + "%</small>";
-
-      var rev = $("review");
-      rev.innerHTML = "";
-      if (Array.isArray(res.review)) {
-        questions.forEach(function (q, i) {
-          var r = res.review[i] || {};
-          var ok = !!r.isCorrect;
-          var item = document.createElement("div");
-          item.className = "review-item";
-
-          var qline = document.createElement("div");
-          qline.className = "review-q";
-          var tag = document.createElement("span");
-          tag.className = "tag " + (ok ? "ok" : "no");
-          tag.textContent = ok ? "答對" : "答錯";
-          qline.appendChild(tag);
-          qline.appendChild(document.createTextNode((i + 1) + ". " + q.q));
-          item.appendChild(qline);
-
-          var d = document.createElement("div");
-          d.className = "review-detail";
-          var yours = answers[i] === null ? "(未作答)" : q.options[answers[i]];
-          d.innerHTML = ok
-            ? "你的答案:<em>" + esc(yours) + "</em>"
-            : "你的答案:" + esc(yours) + "　正解:<em>" + esc(r.correct) + "</em>";
-          if (r.explain) d.innerHTML += "<br>" + esc(r.explain);
-          item.appendChild(d);
-
-          rev.appendChild(item);
-        });
-      }
-    }
-
     function esc(s) {
       return String(s).replace(/[&<>"]/g, function (c) {
         return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
       });
     }
 
-    /* ---------- 送出到 Apps Script ---------- */
-    function submitResult() {
-      var box = $("status");
-      if (submitting) return;
-      submitting = true;
+    function setStatus(kind, text) {
+      var box = $("qstatus");
+      box.className = "status " + kind + (text ? "" : " hidden");
+      box.textContent = text || "";
+    }
 
-      $("btn-retry").classList.add("hidden");
-      box.className = "status pending";
-      box.textContent = "計分中…";
-
-      var payload = {
-        name: playerName,
-        questions: questions.map(function (q) { return q.q; }),
-        picks: answers
-      };
-
+    /* ---------- 與 Apps Script 溝通 ---------- */
+    function post(payload) {
       // 用 text/plain 送出,避開 CORS 預檢請求(Apps Script 不處理 OPTIONS)
-      fetch(apiUrl, {
+      return fetch(apiUrl, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(payload)
@@ -421,20 +305,226 @@
             e.code = res && res.code;
             throw e;
           }
-          renderResult(res);
-          box.className = "status ok";
-          box.textContent = "已送出,結果記錄完成 ✓";
-        })
-        .catch(function (err) {
-          box.className = "status err";
-          box.textContent = "送出失敗:" + err.message;
-          // 題目已更新就只能重新整理,重送也沒用
-          if (err.code !== "STALE") $("btn-retry").classList.remove("hidden");
-        })
-        .then(function () { submitting = false; });
+          return res;
+        });
     }
 
-    $("btn-retry").addEventListener("click", submitResult);
+    function send(payload) {
+      busy = true;
+      pending = payload;
+      $("qbox").classList.add("hidden");
+      $("qloading").classList.remove("hidden");
+      $("btn-retry").classList.add("hidden");
+      $("btn-restart").classList.add("hidden");
+
+      post(payload)
+        .then(function (res) {
+          busy = false;
+          pending = null;
+          if (res.session) session = res.session;
+          if (res.total) total = res.total;
+          if (res.done) renderResult(res);
+          else renderQuestion(res.question, res.step);
+        })
+        .catch(function (err) {
+          busy = false;
+          $("qloading").classList.add("hidden");
+          setStatus("err", "連線失敗:" + err.message);
+          if (err.code === "EXPIRED") $("btn-restart").classList.remove("hidden");
+          else $("btn-retry").classList.remove("hidden");
+        });
+    }
+
+    /* ---------- 載入 ---------- */
+    $("title").textContent = QUIZ_CONFIG.title || "線上測驗";
+    $("subtitle").textContent = QUIZ_CONFIG.subtitle || "";
+    document.title = QUIZ_CONFIG.title || document.title;
+
+    function loadFail(msg) {
+      $("title").textContent = "測驗載入失敗";
+      $("subtitle").textContent = msg;
+    }
+
+    if (!apiUrl) {
+      loadFail("尚未設定 appsScriptUrl(見 README)");
+    } else {
+      fetch(apiUrl, { cache: "no-store" })
+        .then(function (r) {
+          if (!r.ok) throw new Error("HTTP " + r.status);
+          return r.json();
+        })
+        .then(function (res) {
+          if (!res || res.ok === false) throw new Error((res && res.error) || "伺服器回報失敗");
+          var rules = [
+            "共 " + res.total + " 題,一次一題,不能回到上一題",
+            res.timeLimit ? "每題限時 " + res.timeLimit + " 秒,時間到自動交出" : "每題都有作答時間限制,時間到自動交出",
+            "作答中切換到其他 App、分頁或視窗,該題直接算錯",
+            "每個人的題目與選項順序都不一樣"
+          ];
+          $("rules").innerHTML = rules.map(function (t) { return "<li>" + esc(t) + "</li>"; }).join("");
+          if (!QUIZ_CONFIG.requireName) $("name-block").classList.add("hidden");
+          show("screen-start");
+        })
+        .catch(function (err) {
+          loadFail(err.message);
+        });
+    }
+
+    /* ---------- 開始 ---------- */
+    $("btn-start").addEventListener("click", function () {
+      if (QUIZ_CONFIG.requireName) {
+        playerName = $("player").value.trim();
+        if (!playerName) { $("player").focus(); return; }
+      } else {
+        playerName = "";
+      }
+      session = null;
+      question = null;
+      $("pname").textContent = playerName;
+      $("pmeta").textContent = "";
+      $("pbar").style.width = "0%";
+      setStatus("", "");
+      show("screen-quiz");
+      send({ action: "start", name: playerName });
+    });
+
+    /* ---------- 作答畫面 ---------- */
+    function renderQuestion(q, s) {
+      question = q;
+      step = s;
+      picked = null;
+
+      $("qloading").classList.add("hidden");
+      $("qbox").classList.remove("hidden");
+      $("pmeta").textContent = "第 " + (s + 1) + " / " + total + " 題";
+      $("pbar").style.width = (s / total * 100) + "%";
+      $("qtext").textContent = q.q;
+
+      var box = $("opts");
+      box.innerHTML = "";
+      q.options.forEach(function (text, i) {
+        var label = document.createElement("label");
+        label.className = "opt";
+
+        var input = document.createElement("input");
+        input.type = "radio";
+        input.name = "q" + s;
+        input.value = String(i);
+        input.addEventListener("change", function () {
+          picked = i;
+          $("btn-next").disabled = false;
+        });
+
+        var span = document.createElement("span");
+        span.setAttribute("data-letter", LETTERS[i] || (i + 1));
+        span.appendChild(document.createTextNode(text));
+
+        label.appendChild(input);
+        label.appendChild(span);
+        box.appendChild(label);
+      });
+
+      $("btn-next").disabled = true;
+      $("btn-next").textContent = s === total - 1 ? "交卷" : "確定";
+      startTimer(q.remaining, q.limit);
+    }
+
+    function startTimer(remaining, limit) {
+      stopTimer();
+      deadline = Date.now() + remaining * 1000;
+      var tick = function () {
+        var left = Math.max(0, deadline - Date.now());
+        $("tleft").textContent = Math.ceil(left / 1000) + " 秒";
+        $("tbar").style.width = (left / (limit * 1000) * 100) + "%";
+        $("timer").classList.toggle("urgent", left <= 5000);
+        if (left <= 0) submit(false);  // 時間到:有選就交選的,沒選算逾時
+      };
+      tick();
+      timerId = setInterval(tick, 100);
+    }
+
+    function stopTimer() {
+      if (timerId) clearInterval(timerId);
+      timerId = null;
+    }
+
+    function submit(left) {
+      if (busy || !question) return;
+      stopTimer();
+      question = null;
+      setStatus(left ? "err" : "", left ? "你剛剛離開了作答畫面,該題以答錯計算" : "");
+      send({ action: "answer", session: session, step: step, pick: left ? null : picked, left: !!left });
+    }
+
+    $("btn-next").addEventListener("click", function () {
+      if (picked !== null) submit(false);
+    });
+
+    $("btn-retry").addEventListener("click", function () {
+      if (pending && !busy) { setStatus("", ""); send(pending); }
+    });
+
+    $("btn-restart").addEventListener("click", function () {
+      show("screen-start");
+    });
+
+    /* ---------- 防作弊 ---------- */
+    // 題目顯示中離開畫面(切 App、切分頁、點到別的視窗),該題直接算錯
+    function onLeave() {
+      if (question && !busy) submit(true);
+    }
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) onLeave();
+    });
+    window.addEventListener("blur", onLeave);
+
+    // 作答中不能複製、右鍵、拖曳題目文字
+    ["copy", "cut", "contextmenu", "selectstart", "dragstart"].forEach(function (type) {
+      $("screen-quiz").addEventListener(type, function (e) { e.preventDefault(); });
+    });
+
+    /* ---------- 結果 ---------- */
+    function renderResult(res) {
+      stopTimer();
+      question = null;
+
+      $("score").innerHTML = res.score + " / " + res.total +
+        "<small>答對率 " + res.percent + "%</small>";
+      var notes = [];
+      if (res.timeouts) notes.push("逾時 " + res.timeouts + " 題");
+      if (res.leaves) notes.push("離開畫面 " + res.leaves + " 次");
+      $("score-note").textContent = notes.join(" · ");
+
+      var rev = $("review");
+      rev.innerHTML = "";
+      rev.classList.toggle("hidden", !Array.isArray(res.review));
+      (res.review || []).forEach(function (r, i) {
+        var item = document.createElement("div");
+        item.className = "review-item";
+
+        var qline = document.createElement("div");
+        qline.className = "review-q";
+        var tag = document.createElement("span");
+        tag.className = "tag " + (r.status === "ok" ? "ok" : r.status === "wrong" ? "no" : "warn");
+        tag.textContent = STATUS_TEXT[r.status] || r.status;
+        qline.appendChild(tag);
+        qline.appendChild(document.createTextNode((i + 1) + ". " + r.q));
+        item.appendChild(qline);
+
+        var d = document.createElement("div");
+        d.className = "review-detail";
+        var yours = r.yours || "(未作答)";
+        d.innerHTML = r.status === "ok"
+          ? "你的答案:<em>" + esc(yours) + "</em>"
+          : "你的答案:" + esc(yours) + "　正解:<em>" + esc(r.correct) + "</em>";
+        if (r.explain) d.innerHTML += "<br>" + esc(r.explain);
+        item.appendChild(d);
+
+        rev.appendChild(item);
+      });
+
+      show("screen-result");
+    }
 
     $("btn-again").addEventListener("click", function () {
       show("screen-start");
