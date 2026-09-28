@@ -70,6 +70,7 @@ function doPost(e) {
     }
     var data = JSON.parse(e.postData.contents);
     if (data.action === 'begin') return jsonOut_(begin_(data));
+    if (data.action === 'claim') return jsonOut_(claim_(data));
     if (data.action === 'submit') return jsonOut_(submit_(data));
     if (data.action === 'start') return jsonOut_(start_(data));
     if (data.action === 'answer') return jsonOut_(answer_(data));
@@ -110,6 +111,32 @@ function begin_(data) {
 
 
 /**
+ * 認領:使用者真的按下「開始作答」時呼叫,把名字補上。
+ *
+ * 題目是在頁面載入時就先抓好的(為了讓開始作答沒有等待),那時還不知道
+ * 名字,所以試算表那列先記成「(未開始)」。只開了頁面就離開的人會停在
+ * 那個狀態,跟真的開始作答後放棄的人區分得開。
+ *
+ * 前端不等這個呼叫的結果,失敗也沒關係 —— 交卷時會再帶一次名字。
+ */
+function claim_(data) {
+  var sess = loadSession_(data.session);
+  if (!sess) return { ok: false, code: 'EXPIRED', error: '這次作答已失效,請重新開始' };
+
+  sess.name = cleanName_(data.name);
+  saveSession_(sess);
+
+  withLock_(function () {
+    var sheet = getSheet_();
+    var row = findRow_(sheet, sess);
+    if (row) sheet.getRange(row, 3, 1, 2).setValues([[sess.name, '作答中']]);
+  });
+
+  return { ok: true, type: 'claim' };
+}
+
+
+/**
  * 交卷:picks[i] 對應 begin_ 發出去的第 i 題(也就是 sess.order[i])。
  *   picks[i] = { pick: 選項索引(前端看到的順序), secs: 作答秒數, left: 是否離開過畫面 }
  */
@@ -117,6 +144,9 @@ function submit_(data) {
   var sess = loadSession_(data.session);
   if (!sess) return { ok: false, code: 'EXPIRED', error: '這次作答已失效,請重新開始' };
   if (sess.final) return sess.final;   // 重送交卷:直接回傳先前的成績,不重複計分
+
+  // claim 可能失敗或根本沒送到,交卷時的名字才是最終依據
+  if (data.name) sess.name = cleanName_(data.name);
 
   var picks = data.picks || [];
   sess.results = [];
@@ -167,7 +197,8 @@ function start_(data) {
  */
 function newSession_(data) {
   var questions = loadQuestions_();
-  var name = String(data.name || '').trim().slice(0, 20) || '(未具名)';
+  // 預先載入時還不知道名字,先記成「(未開始)」,按下開始作答後由 claim_ 補上
+  var name = data.name ? cleanName_(data.name) : '(未開始)';
   var id = Utilities.getUuid();
 
   var order = range_(questions.length);
@@ -194,10 +225,31 @@ function newSession_(data) {
     var sheet = getSheet_();
     ensureHeader_(sheet, questions.length);
     sheet.appendRow([new Date(sess.startedAt), sess.code, name, '作答中', '', questions.length, '', '', '']);
+    sess.row = sheet.getLastRow();   // 記住列號,之後就不必在整張表裡搜尋
   });
 
   saveSession_(sess);
   return sess;
+}
+
+
+function cleanName_(v) {
+  return String(v || '').trim().slice(0, 20) || '(未具名)';
+}
+
+
+/**
+ * 找出這次作答在試算表的列號。優先用 session 記住的列號,
+ * 只在對不上時(例如有人手動插入或刪除列)才退回搜尋作答編號。
+ */
+function findRow_(sheet, sess) {
+  if (sess.row && sheet.getRange(sess.row, 2).getDisplayValue() === sess.code) return sess.row;
+
+  var last = sheet.getLastRow();
+  if (last < 2) return 0;
+  var found = sheet.getRange(2, 2, last - 1, 1)
+                   .createTextFinder(sess.code).matchEntireCell(true).findNext();
+  return found ? found.getRow() : 0;
 }
 
 
@@ -287,14 +339,9 @@ function finish_(sess) {
   withLock_(function () {
     var sheet = getSheet_();
     ensureHeader_(sheet, total);
-    var last = sheet.getLastRow();
-    var found = last < 2 ? null : sheet.getRange(2, 2, last - 1, 1)
-      .createTextFinder(sess.code).matchEntireCell(true).findNext();
-    if (found) {
-      sheet.getRange(found.getRow(), 1, 1, row.length).setValues([row]);
-    } else {
-      sheet.appendRow(row);
-    }
+    var at = findRow_(sheet, sess);
+    if (at) sheet.getRange(at, 1, 1, row.length).setValues([row]);
+    else sheet.appendRow(row);
   });
 
   var res = { ok: true, type: 'result', done: true, score: score, total: total, percent: percent, leaves: leaves, timeouts: timeouts };

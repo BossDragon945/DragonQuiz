@@ -325,7 +325,7 @@
     // POST 的結果要經過一次 302 轉址才拿得到。那個轉址失效時,Google 會改用
     // GET 重跑腳本、回傳 doGet 的輸出 —— 它長得像成功(ok:true)但內容完全
     // 不是你要的。靠 type 欄位辨識出來,當成暫時性故障重試。
-    var EXPECT = { begin: ["begin"], submit: ["result"], answer: ["question", "result"] };
+    var EXPECT = { begin: ["begin"], claim: ["claim"], submit: ["result"], answer: ["question", "result"] };
     function checkType(payload, res) {
       var want = EXPECT[payload.action];
       if (want && want.indexOf(res.type) === -1) {
@@ -338,7 +338,9 @@
 
     // submit 在伺服器端是冪等的(已交卷的 session 會直接回傳先前成績,不重複計分),
     // 所以重送安全。begin 會產生新 session 與新的一列紀錄,不能自動重送。
-    var RETRYABLE = { submit: true, answer: true };
+    // begin 失敗重送會在試算表多留一列「(未開始)」,但那跟「開了頁面就離開」
+    // 長得一樣、不會被誤判成作答紀錄,所以為了載入可靠性還是允許重試。
+    var RETRYABLE = { begin: true, submit: true, answer: true };
     function postWithRetry(payload, tries) {
       tries = tries || 0;
       return post(payload).catch(function (err) {
@@ -442,36 +444,24 @@
           '還在連線中…<span class="hint">已經等了一段時間,若超過 30 秒仍無反應,請重新整理頁面</span>';
       }, 12000));
 
-      // GET 是唯讀的,重試絕對安全
-      function loadInfo(tries) {
-        return fetch(apiUrl, { cache: "no-store" })
-          .then(function (r) {
-            if (!r.ok) throw new Error("HTTP " + r.status);
-            return r.json();
-          })
-          .then(function (res) {
-            if (res && res.ok !== false && res.type !== "info") {
-              var e = new Error("伺服器回應不是這次請求的結果");
-              e.transient = true;
-              throw e;
-            }
-            return res;
-          })
-          .catch(function (err) {
-            if (tries >= 3 || !isTransient(err)) throw err;
-            return new Promise(function (resolve) {
-              setTimeout(resolve, 800 * Math.pow(2, tries));
-            }).then(function () { return loadInfo(tries + 1); });
-          });
-      }
+      // 開頁面時就把題目抓好(此時還不知道名字,按下開始後由 claim 補上)。
+      // 使用者在讀規則、打名字的期間就載入完了,按「開始作答」是瞬間的。
+      prefetch();
+    }
 
-      loadInfo(0)
+    function prefetch() {
+      return postWithRetry({ action: "begin", name: "" })
         .then(function (res) {
           stopLoading();
-          if (!res || res.ok === false) throw new Error((res && res.error) || "伺服器回報失敗");
+          session = res.session;
+          total = res.total;
+          questions = res.questions;
+
+          var limits = questions.map(function (q) { return q.limit; });
+          var same = limits.every(function (x) { return x === limits[0]; });
           var rules = [
-            "共 " + res.total + " 題,一次一題,不能回到上一題",
-            res.timeLimit ? "每題限時 " + res.timeLimit + " 秒,時間到自動交出" : "每題都有作答時間限制,時間到自動交出",
+            "共 " + total + " 題,一次一題,不能回到上一題",
+            same ? "每題限時 " + limits[0] + " 秒,時間到自動交出" : "每題都有作答時間限制,時間到自動交出",
             "作答中切換到其他 App、分頁或視窗,該題直接算錯",
             "每個人的題目與選項順序都不一樣"
           ];
@@ -492,16 +482,21 @@
       } else {
         playerName = "";
       }
-      session = null;
+      // 題目已經在頁面載入時抓好了,這裡不需要任何網路等待
       question = null;
-      questions = [];
       picks = [];
       $("pname").textContent = playerName;
       $("pmeta").textContent = "";
       $("pbar").style.width = "0%";
       setStatus("", "");
       show("screen-quiz");
-      send({ action: "begin", name: playerName });
+
+      // 把名字補回試算表那列。刻意不等結果 —— 等於是背景作業,
+      // 失敗也沒關係,交卷時會再帶一次名字。
+      postWithRetry({ action: "claim", session: session, name: playerName || "(未具名)" })
+        .catch(function () { /* best effort */ });
+
+      renderQuestion(0);
     });
 
     /* ---------- 作答畫面 ---------- */
@@ -585,7 +580,7 @@
 
       // 換題完全在本機,不跟伺服器往返 —— 所以是瞬間的
       if (step < total - 1) renderQuestion(step + 1);
-      else send({ action: "submit", session: session, picks: picks });
+      else send({ action: "submit", session: session, picks: picks, name: playerName || "(未具名)" });
     }
 
     $("btn-next").addEventListener("click", function () {
@@ -597,8 +592,21 @@
     });
 
     $("btn-restart").addEventListener("click", function () {
-      show("screen-start");
+      restart();
     });
+
+    // 重新開始需要一份全新的 session(舊的已交卷或已失效),所以要再抓一次題目
+    function restart() {
+      session = null;
+      questions = [];
+      picks = [];
+      question = null;
+      stopTimer();
+      setStatus("", "");
+      $("loading-text").textContent = "正在重新取得題目…";
+      show("screen-loading");
+      prefetch();
+    }
 
     /* ---------- 防作弊 ---------- */
     // 題目顯示中離開畫面(切 App、切分頁、點到別的視窗),該題直接算錯
@@ -659,8 +667,7 @@
     }
 
     $("btn-again").addEventListener("click", function () {
-      show("screen-start");
-      if (QUIZ_CONFIG.requireName) $("player").focus();
+      restart();
     });
   })();
   </script>
