@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>胖胖龍家族知識大考驗</title>
+  <meta name="description" content="胖胖龍爹地的Dragon家族線上測驗">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@700;900&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --gold: #C8932E;
+      --gold-deep: #A07419;
+      --gold-light: #E8B547;
+      --dark: #1C1612;
+      --dark-soft: #261D17;
+      --paper: #FAE7C9;
+      --red: #7A1F1F;
+      --green: #5A6E4F;
+      --text-light: #F5E6D3;
+      --font-title: 'Noto Serif TC', serif;
+      --font-body: 'Noto Sans TC', sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--dark);
+      background-image:
+        radial-gradient(ellipse at top, rgba(200,147,46,.13), transparent 60%),
+        radial-gradient(ellipse at bottom, rgba(200,147,46,.07), transparent 60%);
+      color: var(--text-light);
+      font-family: var(--font-body);
+      line-height: 1.7;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 24px 16px 64px;
+    }
+
+    .wrap { width: 100%; max-width: 680px; }
+
+    .card {
+      background: var(--dark-soft);
+      border: 1px solid rgba(200,147,46,.3);
+      border-radius: 14px;
+      padding: 28px 24px;
+      box-shadow: 0 10px 40px rgba(0,0,0,.45), inset 0 1px 0 rgba(200,147,46,.18);
+    }
+
+    h1 {
+      font-family: var(--font-title);
+      font-weight: 900;
+      color: var(--gold-light);
+      font-size: clamp(1.5rem, 5vw, 2.1rem);
+      margin: 0 0 8px;
+      text-align: center;
+      letter-spacing: .04em;
+    }
+
+    .subtitle { text-align: center; color: rgba(245,230,211,.62); margin: 0 0 28px; font-size: .95rem; }
+
+    /* ---------- 表單 ---------- */
+    label.field { display: block; margin-bottom: 8px; font-weight: 500; color: var(--gold-light); }
+
+    input[type="text"] {
+      width: 100%;
+      padding: 12px 14px;
+      font-size: 1rem;
+      font-family: inherit;
+      color: var(--text-light);
+      background: rgba(0,0,0,.28);
+      border: 1px solid rgba(200,147,46,.42);
+      border-radius: 8px;
+    }
+    input[type="text"]:focus { outline: 2px solid var(--gold); outline-offset: 1px; border-color: var(--gold); }
+
+    .btn {
+      display: inline-block;
+      width: 100%;
+      margin-top: 18px;
+      padding: 13px 20px;
+      font: inherit;
+      font-weight: 700;
+      color: var(--dark);
+      background: linear-gradient(180deg, var(--gold-light), var(--gold));
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: filter .15s, transform .05s;
+    }
+    .btn:hover:not(:disabled) { filter: brightness(1.08); }
+    .btn:active:not(:disabled) { transform: translateY(1px); }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn.secondary {
+      background: transparent;
+      color: var(--gold-light);
+      border: 1px solid rgba(200,147,46,.5);
+    }
+    .btn-row { display: flex; gap: 12px; }
+    .btn-row .btn { margin-top: 0; }
+
+    /* ---------- 進度 ---------- */
+    .progress-meta {
+      display: flex; justify-content: space-between;
+      font-size: .85rem; color: rgba(245,230,211,.6); margin-bottom: 8px;
+    }
+    .bar { height: 6px; background: rgba(0,0,0,.35); border-radius: 99px; overflow: hidden; margin-bottom: 26px; }
+    .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--gold-deep), var(--gold-light)); transition: width .25s; }
+
+    /* ---------- 題目 ---------- */
+    .qtext {
+      font-family: var(--font-title);
+      font-weight: 700;
+      font-size: clamp(1.1rem, 3.6vw, 1.32rem);
+      color: #fff;
+      margin: 0 0 20px;
+    }
+
+    .opt { display: block; margin-bottom: 11px; }
+    .opt input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .opt span {
+      display: flex; align-items: center; gap: 12px;
+      padding: 13px 16px;
+      background: rgba(0,0,0,.22);
+      border: 1px solid rgba(200,147,46,.26);
+      border-radius: 9px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+    .opt span::before {
+      content: attr(data-letter);
+      flex: 0 0 26px; height: 26px;
+      display: grid; place-items: center;
+      font-weight: 700; font-size: .85rem;
+      color: var(--gold-light);
+      border: 1px solid rgba(200,147,46,.5);
+      border-radius: 50%;
+    }
+    .opt span:hover { background: rgba(200,147,46,.1); border-color: rgba(200,147,46,.5); }
+    .opt input:focus-visible + span { outline: 2px solid var(--gold); outline-offset: 2px; }
+    .opt input:checked + span {
+      background: rgba(200,147,46,.19);
+      border-color: var(--gold);
+    }
+    .opt input:checked + span::before { background: var(--gold); color: var(--dark); border-color: var(--gold); }
+
+    /* ---------- 結果 ---------- */
+    .score {
+      text-align: center;
+      font-family: var(--font-title);
+      font-weight: 900;
+      font-size: clamp(2.6rem, 12vw, 3.6rem);
+      color: var(--gold-light);
+      line-height: 1.1;
+      margin: 6px 0 2px;
+    }
+    .score small { display: block; font-size: 1rem; font-family: var(--font-body); font-weight: 400; color: rgba(245,230,211,.65); margin-top: 6px; }
+
+    .review { margin-top: 26px; border-top: 1px solid rgba(200,147,46,.22); padding-top: 20px; }
+    .review-item { padding: 14px 0; border-bottom: 1px dashed rgba(200,147,46,.16); }
+    .review-item:last-child { border-bottom: none; }
+    .review-q { font-weight: 500; margin-bottom: 6px; }
+    .tag { display: inline-block; font-size: .78rem; font-weight: 700; padding: 2px 9px; border-radius: 99px; margin-right: 8px; }
+    .tag.ok { background: var(--green); color: #fff; }
+    .tag.no { background: var(--red); color: #fff; }
+    .review-detail { font-size: .9rem; color: rgba(245,230,211,.72); }
+    .review-detail em { color: var(--gold-light); font-style: normal; font-weight: 500; }
+
+    .status { margin-top: 20px; padding: 12px 14px; border-radius: 8px; font-size: .9rem; text-align: center; }
+    .status.pending { background: rgba(200,147,46,.12); color: var(--gold-light); }
+    .status.ok { background: rgba(90,110,79,.28); color: #cfe3c2; }
+    .status.err { background: rgba(122,31,31,.3); color: #f0c9c9; }
+
+    .hidden { display: none !important; }
+    .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1 id="title">載入中…</h1>
+      <p class="subtitle" id="subtitle"></p>
+
+      <!-- ======== 畫面 1:開始 ======== -->
+      <section id="screen-start" class="hidden">
+        <div id="name-block">
+          <label class="field" for="player">你的名字</label>
+          <input type="text" id="player" maxlength="20" autocomplete="name" placeholder="請輸入名字">
+        </div>
+        <button class="btn" id="btn-start">開始作答</button>
+        <p class="subtitle" style="margin:16px 0 0;font-size:.85rem" id="qcount"></p>
+      </section>
+
+      <!-- ======== 畫面 2:作答 ======== -->
+      <section id="screen-quiz" class="hidden">
+        <div class="progress-meta">
+          <span id="pmeta"></span><span id="pname"></span>
+        </div>
+        <div class="bar"><i id="pbar" style="width:0%"></i></div>
+
+        <h2 class="qtext" id="qtext"></h2>
+        <div id="opts" role="radiogroup" aria-labelledby="qtext"></div>
+
+        <div class="btn-row" style="margin-top:22px">
+          <button class="btn secondary" id="btn-prev">上一題</button>
+          <button class="btn" id="btn-next" disabled>下一題</button>
+        </div>
+      </section>
+
+      <!-- ======== 畫面 3:結果 ======== -->
+      <section id="screen-result" class="hidden">
+        <div class="score" id="score"></div>
+        <div id="status" class="status pending">準備送出…</div>
+        <div class="review" id="review"></div>
+        <button class="btn secondary" id="btn-again" style="margin-top:24px">再作答一次</button>
+      </section>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script>
+  (function () {
+    "use strict";
+
+    var LETTERS = ["A", "B", "C", "D", "E", "F"];
+    var questions = [];
+    var answers = [];      // 每題選了第幾個,未作答為 null
+    var current = 0;
+    var playerName = "";
+    var submitted = false;
+
+    var $ = function (id) { return document.getElementById(id); };
+    function show(id) {
+      ["screen-start", "screen-quiz", "screen-result"].forEach(function (s) {
+        $(s).classList.toggle("hidden", s !== id);
+      });
+    }
+
+    /* ---------- 載入題庫 ---------- */
+    $("title").textContent = QUIZ_CONFIG.title || "線上測驗";
+    $("subtitle").textContent = QUIZ_CONFIG.subtitle || "";
+    document.title = QUIZ_CONFIG.title || document.title;
+
+    fetch("questions.json", { cache: "no-store" })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        if (!Array.isArray(data) || data.length === 0) throw new Error("題庫是空的");
+        questions = data;
+        answers = new Array(data.length).fill(null);
+        $("qcount").textContent = "共 " + data.length + " 題";
+        if (!QUIZ_CONFIG.requireName) $("name-block").classList.add("hidden");
+        show("screen-start");
+      })
+      .catch(function (err) {
+        $("title").textContent = "題庫載入失敗";
+        $("subtitle").textContent = "questions.json 讀取不到或格式有誤(" + err.message + ")";
+      });
+
+    /* ---------- 開始 ---------- */
+    $("btn-start").addEventListener("click", function () {
+      if (QUIZ_CONFIG.requireName) {
+        playerName = $("player").value.trim();
+        if (!playerName) { $("player").focus(); return; }
+      } else {
+        playerName = "(未具名)";
+      }
+      current = 0;
+      answers.fill(null);
+      submitted = false;
+      $("pname").textContent = playerName;
+      renderQuestion();
+      show("screen-quiz");
+    });
+
+    /* ---------- 作答畫面 ---------- */
+    function renderQuestion() {
+      var q = questions[current];
+      $("pmeta").textContent = "第 " + (current + 1) + " / " + questions.length + " 題";
+      $("pbar").style.width = ((current) / questions.length * 100) + "%";
+      $("qtext").textContent = q.q;
+
+      var box = $("opts");
+      box.innerHTML = "";
+      q.options.forEach(function (text, i) {
+        var label = document.createElement("label");
+        label.className = "opt";
+
+        var input = document.createElement("input");
+        input.type = "radio";
+        input.name = "q" + current;
+        input.value = String(i);
+        input.checked = answers[current] === i;
+        input.addEventListener("change", function () {
+          answers[current] = i;
+          $("btn-next").disabled = false;
+        });
+
+        var span = document.createElement("span");
+        span.setAttribute("data-letter", LETTERS[i] || (i + 1));
+        span.appendChild(document.createTextNode(text));
+
+        label.appendChild(input);
+        label.appendChild(span);
+        box.appendChild(label);
+      });
+
+      $("btn-prev").disabled = current === 0;
+      $("btn-next").disabled = answers[current] === null;
+      $("btn-next").textContent = current === questions.length - 1 ? "看結果" : "下一題";
+    }
+
+    $("btn-prev").addEventListener("click", function () {
+      if (current > 0) { current--; renderQuestion(); }
+    });
+
+    $("btn-next").addEventListener("click", function () {
+      if (answers[current] === null) return;
+      if (current < questions.length - 1) { current++; renderQuestion(); }
+      else finish();
+    });
+
+    /* ---------- 結果 ---------- */
+    function finish() {
+      var correct = 0;
+      questions.forEach(function (q, i) { if (answers[i] === q.answer) correct++; });
+      var pct = Math.round(correct / questions.length * 100);
+
+      $("score").innerHTML = correct + " / " + questions.length +
+        "<small>答對率 " + pct + "%</small>";
+
+      var rev = $("review");
+      rev.innerHTML = "";
+      if (QUIZ_CONFIG.showAnswers) {
+        questions.forEach(function (q, i) {
+          var ok = answers[i] === q.answer;
+          var item = document.createElement("div");
+          item.className = "review-item";
+
+          var qline = document.createElement("div");
+          qline.className = "review-q";
+          var tag = document.createElement("span");
+          tag.className = "tag " + (ok ? "ok" : "no");
+          tag.textContent = ok ? "答對" : "答錯";
+          qline.appendChild(tag);
+          qline.appendChild(document.createTextNode((i + 1) + ". " + q.q));
+          item.appendChild(qline);
+
+          var d = document.createElement("div");
+          d.className = "review-detail";
+          var yours = answers[i] === null ? "(未作答)" : q.options[answers[i]];
+          d.innerHTML = ok
+            ? "你的答案:<em>" + esc(yours) + "</em>"
+            : "你的答案:" + esc(yours) + "　正解:<em>" + esc(q.options[q.answer]) + "</em>";
+          if (q.explain) d.innerHTML += "<br>" + esc(q.explain);
+          item.appendChild(d);
+
+          rev.appendChild(item);
+        });
+      }
+
+      show("screen-result");
+      submitResult(correct, pct);
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"]/g, function (c) {
+        return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c];
+      });
+    }
+
+    /* ---------- 送出到 Apps Script ---------- */
+    function submitResult(correct, pct) {
+      var box = $("status");
+      var url = (QUIZ_CONFIG.appsScriptUrl || "").trim();
+
+      if (!url) {
+        box.className = "status err";
+        box.textContent = "尚未設定儲存位置,這次結果沒有送出(見 README 設定 appsScriptUrl)";
+        return;
+      }
+      if (submitted) return;
+      submitted = true;
+
+      box.className = "status pending";
+      box.textContent = "正在送出結果…";
+
+      var payload = {
+        name: playerName,
+        score: correct,
+        total: questions.length,
+        percent: pct,
+        answers: questions.map(function (q, i) {
+          return {
+            q: q.q,
+            picked: answers[i] === null ? "" : q.options[answers[i]],
+            correct: q.options[q.answer],
+            isCorrect: answers[i] === q.answer
+          };
+        })
+      };
+
+      // 用 text/plain 送出,避開 CORS 預檢請求(Apps Script 不處理 OPTIONS)
+      fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(payload)
+      })
+        .then(function (r) { return r.json().catch(function () { return { ok: r.ok }; }); })
+        .then(function (res) {
+          if (res && res.ok === false) throw new Error(res.error || "伺服器回報失敗");
+          box.className = "status ok";
+          box.textContent = "已送出,結果記錄完成 ✓";
+        })
+        .catch(function (err) {
+          submitted = false;
+          box.className = "status err";
+          box.textContent = "送出失敗:" + err.message + "(分數仍然有效,可稍後重試)";
+        });
+    }
+
+    $("btn-again").addEventListener("click", function () {
+      show("screen-start");
+      if (QUIZ_CONFIG.requireName) $("player").focus();
+    });
+  })();
+  </script>
+</body>
+</html>
