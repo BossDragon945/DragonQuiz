@@ -329,6 +329,12 @@ function ensureHeader_(sheet, questionCount) {
     header.push('第' + i + '題作答', '第' + i + '題', '第' + i + '題秒數');
   }
 
+  // 新工作表預設只有 26 欄,6 題以上就會超出,先把欄位補足
+  var maxCols = sheet.getMaxColumns();
+  if (maxCols < header.length) {
+    sheet.insertColumnsAfter(maxCols, header.length - maxCols);
+  }
+
   sheet.getRange(1, 1, 1, header.length).setValues([header])
        .setFontWeight('bold')
        .setBackground('#1C1612')
