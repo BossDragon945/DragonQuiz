@@ -17,6 +17,9 @@ var SHEET_NAME = '作答紀錄';
 // 題庫工作表,不存在時會自動建立標題列
 var QUESTION_SHEET_NAME = '題庫';
 
+// 活動開放時間設在這個工作表,不存在時會自動建立
+var SETTING_SHEET_NAME = '設定';
+
 // 每題預設限時(秒);題庫「限時秒數」欄有填的題目以該欄為準
 var DEFAULT_TIME_LIMIT = 15;
 
@@ -45,12 +48,15 @@ function doGet() {
     var questions = loadQuestions_();
     var limits = questions.map(function (q) { return q.limit; });
     var same = limits.every(function (s) { return s === limits[0]; });
+    var w = windowState_();
     return jsonOut_({
       ok: true,
       type: 'info',
       message: '測驗接收端運作中',
       total: questions.length,
-      timeLimit: same ? limits[0] : null
+      timeLimit: same ? limits[0] : null,
+      open: w.open,
+      window: w.detail || '(未設定,隨時可作答)'
     });
   } catch (err) {
     return jsonOut_({ ok: false, error: errMsg_(err) });
@@ -70,6 +76,7 @@ function doPost(e) {
     }
     var data = JSON.parse(e.postData.contents);
     if (data.action === 'begin') return jsonOut_(begin_(data));
+    if (data.action === 'check') return jsonOut_(check_(data));
     if (data.action === 'claim') return jsonOut_(claim_(data));
     if (data.action === 'submit') return jsonOut_(submit_(data));
     if (data.action === 'start') return jsonOut_(start_(data));
@@ -91,6 +98,9 @@ function doPost(e) {
  * 正解仍然只存在伺服器端的 session 裡,批改也在伺服器做。
  */
 function begin_(data) {
+  var closed = requireOpen_();
+  if (closed) return closed;          // 活動時間外,連題目都不發
+
   var sess = newSession_(data);
 
   return {
@@ -111,6 +121,39 @@ function begin_(data) {
 
 
 /**
+ * 查名字有沒有用過。使用者在輸入名字時就會先問一次,
+ * 所以按下「開始作答」的當下不必等網路。
+ */
+function check_(data) {
+  var name = cleanName_(data.name);
+  var taken = withLock_(function () {
+    return nameTaken_(getSheet_(), name, data.session || '');
+  });
+  return { ok: true, type: 'check', name: name, taken: taken };
+}
+
+
+/**
+ * 這個名字是否已經開始作答過(不論有沒有交卷)。
+ *
+ * 只要留下過紀錄就算用掉機會 —— 中途關掉頁面也一樣,否則看到難題
+ * 就關掉重來會變成合法的規避手段。ownCode 是這次作答自己的編號,
+ * 要排除掉,不然會擋到自己。
+ */
+function nameTaken_(sheet, name, ownCode) {
+  var last = sheet.getLastRow();
+  if (last < 2) return false;
+
+  // B=作答編號, C=姓名, D=狀態
+  var vals = sheet.getRange(2, 2, last - 1, 3).getDisplayValues();
+  for (var i = 0; i < vals.length; i++) {
+    if (vals[i][1] === name && vals[i][0] !== ownCode) return true;
+  }
+  return false;
+}
+
+
+/**
  * 認領:使用者真的按下「開始作答」時呼叫,把名字補上。
  *
  * 題目是在頁面載入時就先抓好的(為了讓開始作答沒有等待),那時還不知道
@@ -120,18 +163,27 @@ function begin_(data) {
  * 前端不等這個呼叫的結果,失敗也沒關係 —— 交卷時會再帶一次名字。
  */
 function claim_(data) {
+  var closed = requireOpen_();
+  if (closed) return closed;          // 預抓完才過期的情況,按下開始時仍要擋
+
   var sess = loadSession_(data.session);
   if (!sess) return { ok: false, code: 'EXPIRED', error: '這次作答已失效,請重新開始' };
 
-  sess.name = cleanName_(data.name);
-  saveSession_(sess);
+  var name = cleanName_(data.name);
 
-  withLock_(function () {
+  // 查名字和寫入放在同一個鎖裡,兩個人同時按開始才不會都通過
+  var taken = withLock_(function () {
     var sheet = getSheet_();
+    if (nameTaken_(sheet, name, sess.code)) return true;
     var row = findRow_(sheet, sess);
-    if (row) sheet.getRange(row, 3, 1, 2).setValues([[sess.name, '作答中']]);
+    if (row) sheet.getRange(row, 3, 1, 2).setValues([[name, '作答中']]);
+    return false;
   });
 
+  if (taken) return { ok: false, code: 'TAKEN', error: '「' + name + '」已經作答過了' };
+
+  sess.name = name;
+  saveSession_(sess);
   return { ok: true, type: 'claim' };
 }
 
@@ -147,6 +199,15 @@ function submit_(data) {
 
   // claim 可能失敗或根本沒送到,交卷時的名字才是最終依據
   if (data.name) sess.name = cleanName_(data.name);
+
+  // 權威檢查:前端的擋人可以被繞過,這裡才是真正算數的地方
+  var dup = withLock_(function () {
+    return nameTaken_(getSheet_(), sess.name, sess.code);
+  });
+  if (dup) {
+    return { ok: false, code: 'TAKEN',
+             error: '「' + sess.name + '」已經作答過了,這次成績不列入' };
+  }
 
   var picks = data.picks || [];
   sess.results = [];
@@ -235,6 +296,84 @@ function newSession_(data) {
 
 function cleanName_(v) {
   return String(v || '').trim().slice(0, 20) || '(未具名)';
+}
+
+
+/* ---------------- 活動開放時間 ---------------- */
+
+/**
+ * 「設定」工作表,不存在時建立並填好欄位說明。
+ */
+function getSettingSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SETTING_SHEET_NAME);
+  if (sheet) return sheet;
+
+  sheet = ss.insertSheet(SETTING_SHEET_NAME);
+  sheet.getRange(1, 1, 3, 3).setValues([
+    ['項目', '值', '說明'],
+    ['開始時間', '', '留空 = 不限制。填法:2026/11/15 20:00'],
+    ['結束時間', '', '留空 = 不限制。到這個時間就不能再開始作答']
+  ]);
+  sheet.getRange(1, 1, 1, 3)
+       .setFontWeight('bold').setBackground('#1C1612').setFontColor('#E8B547');
+  sheet.setColumnWidth(1, 110);
+  sheet.setColumnWidth(2, 160);
+  sheet.setColumnWidth(3, 340);
+  return sheet;
+}
+
+
+/**
+ * 讀出開放時間。回傳 { open, close },沒填的是 null。
+ * 用 getValues 拿 Date 物件,所以時區跟著試算表走,不必自己剖析字串。
+ */
+function loadWindow_() {
+  var sheet = getSettingSheet_();
+  var v = sheet.getRange(2, 2, 2, 1).getValues();
+  return {
+    open: v[0][0] instanceof Date ? v[0][0] : null,
+    close: v[1][0] instanceof Date ? v[1][0] : null
+  };
+}
+
+
+function fmtTime_(d) {
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy/MM/dd HH:mm');
+}
+
+
+/**
+ * 現在能不能開始作答。不能的話回傳給前端顯示的訊息。
+ * 只擋「開始」—— 在時間內開始的人,超時了仍然可以把題目答完並交卷。
+ */
+function windowState_() {
+  var w = loadWindow_();
+  var now = new Date();
+
+  if (w.open && now < w.open) {
+    return { open: false, reason: '活動尚未開始',
+             detail: '開放時間:' + fmtTime_(w.open) +
+                     (w.close ? ' ~ ' + fmtTime_(w.close) : ' 起') };
+  }
+  if (w.close && now > w.close) {
+    return { open: false, reason: '活動已經結束',
+             detail: '開放時間到 ' + fmtTime_(w.close) + ' 為止' };
+  }
+  return {
+    open: true,
+    detail: w.open || w.close
+      ? '開放時間:' + (w.open ? fmtTime_(w.open) : '不限') +
+        ' ~ ' + (w.close ? fmtTime_(w.close) : '不限')
+      : ''
+  };
+}
+
+
+function requireOpen_() {
+  var s = windowState_();
+  if (s.open) return null;
+  return { ok: false, code: 'CLOSED', error: s.reason, detail: s.detail };
 }
 
 
