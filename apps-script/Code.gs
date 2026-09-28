@@ -126,9 +126,12 @@ function submit_(data) {
     var p = picks[i] || {};
     var cap = q.limit + GRACE_SECONDS;
 
-    var secs = Number(p.secs);
-    if (!(secs >= 0)) secs = cap;
-    secs = Math.min(secs, cap);
+    // 先用原始回報值判斷有沒有超時,再夾進上限 —— 順序反過來的話,
+    // 夾完永遠不會大於上限,超時就再也判不出來了。
+    var raw = Number(p.secs);
+    if (!(raw >= 0)) raw = cap + 1;        // 沒回報秒數:當成超時
+    var overtime = raw > cap;
+    var secs = Math.min(raw, cap);
 
     var valid = typeof p.pick === 'number' && p.pick % 1 === 0 &&
                 p.pick >= 0 && p.pick < q.options.length;
@@ -136,7 +139,7 @@ function submit_(data) {
     var status, pick = null;
     if (p.left) {
       status = 'left';
-    } else if (!valid || secs > cap) {
+    } else if (!valid || overtime) {
       status = 'timeout';
     } else {
       pick = q.perm[p.pick];               // 還原成題庫原本的選項索引
