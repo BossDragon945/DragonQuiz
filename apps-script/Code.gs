@@ -68,6 +68,8 @@ function doPost(e) {
       return jsonOut_({ ok: false, error: '沒有收到資料' });
     }
     var data = JSON.parse(e.postData.contents);
+    if (data.action === 'begin') return jsonOut_(begin_(data));
+    if (data.action === 'submit') return jsonOut_(submit_(data));
     if (data.action === 'start') return jsonOut_(start_(data));
     if (data.action === 'answer') return jsonOut_(answer_(data));
     return jsonOut_({ ok: false, error: '不明的操作' });
@@ -77,9 +79,88 @@ function doPost(e) {
 }
 
 
-/* ---------------- 作答流程 ---------------- */
+/* ---------------- 一次發題流程(目前前端使用)---------------- */
+
+/**
+ * 開始作答:一次回傳全部題目,但**不含正解**。
+ *
+ * 作答過程全部在瀏覽器本機進行,中途不再跟伺服器往返,所以換題是瞬間的。
+ * 代價是計時改由前端回報(可被篡改),而且題目會一次全部出現在瀏覽器裡。
+ * 正解仍然只存在伺服器端的 session 裡,批改也在伺服器做。
+ */
+function begin_(data) {
+  var sess = newSession_(data);
+
+  return {
+    ok: true,
+    session: sess.id,
+    total: sess.order.length,
+    questions: sess.order.map(function (qi) {
+      var q = sess.questions[qi];
+      return {
+        q: q.q,
+        options: q.perm.map(function (i) { return q.options[i]; }),
+        limit: q.limit
+      };
+    })
+  };
+}
+
+
+/**
+ * 交卷:picks[i] 對應 begin_ 發出去的第 i 題(也就是 sess.order[i])。
+ *   picks[i] = { pick: 選項索引(前端看到的順序), secs: 作答秒數, left: 是否離開過畫面 }
+ */
+function submit_(data) {
+  var sess = loadSession_(data.session);
+  if (!sess) return { ok: false, code: 'EXPIRED', error: '這次作答已失效,請重新開始' };
+  if (sess.final) return sess.final;   // 重送交卷:直接回傳先前的成績,不重複計分
+
+  var picks = data.picks || [];
+  sess.results = [];
+
+  sess.order.forEach(function (qi, i) {
+    var q = sess.questions[qi];
+    var p = picks[i] || {};
+    var cap = q.limit + GRACE_SECONDS;
+
+    var secs = Number(p.secs);
+    if (!(secs >= 0)) secs = cap;
+    secs = Math.min(secs, cap);
+
+    var valid = typeof p.pick === 'number' && p.pick % 1 === 0 &&
+                p.pick >= 0 && p.pick < q.options.length;
+
+    var status, pick = null;
+    if (p.left) {
+      status = 'left';
+    } else if (!valid || secs > cap) {
+      status = 'timeout';
+    } else {
+      pick = q.perm[p.pick];               // 還原成題庫原本的選項索引
+      status = pick === q.answer ? 'ok' : 'wrong';
+    }
+
+    sess.results[qi] = { pick: pick, status: status, secs: Math.round(secs * 10) / 10 };
+  });
+
+  sess.step = sess.order.length;
+  return finish_(sess);
+}
+
+
+/* ---------------- 逐題發題流程(舊版前端用,保留相容)---------------- */
 
 function start_(data) {
+  return issue_(newSession_(data));
+}
+
+
+/**
+ * 建立一次作答的 session,並在試算表寫下「作答中」那一列。
+ * 開始時就把題庫整份存進 session,中途改題庫不影響正在作答的人。
+ */
+function newSession_(data) {
   var questions = loadQuestions_();
   var name = String(data.name || '').trim().slice(0, 20) || '(未具名)';
   var id = Utilities.getUuid();
@@ -87,7 +168,6 @@ function start_(data) {
   var order = range_(questions.length);
   if (SHUFFLE) shuffle_(order);
 
-  // 開始時把題庫整份存進這次作答,中途改題庫不影響作答中的人
   var sess = {
     id: id,
     code: 'T' + id.replace(/-/g, '').slice(0, 7),
@@ -111,7 +191,8 @@ function start_(data) {
     sheet.appendRow([new Date(sess.startedAt), sess.code, name, '作答中', '', questions.length, '', '', '']);
   });
 
-  return issue_(sess);
+  saveSession_(sess);
+  return sess;
 }
 
 

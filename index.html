@@ -282,11 +282,14 @@
     var session = null;
     var total = 0;
     var step = 0;
-    var question = null;   // 目前顯示中、還沒交的題目
+    var questions = [];    // begin 一次拿到的全部題目(不含正解)
+    var picks = [];        // 每題的 { pick, secs, left },交卷時一起送出
+    var question = null;   // 目前顯示中、還沒作答的題目
     var picked = null;
     var busy = false;
     var pending = null;    // 送出失敗時,重試用的內容
     var deadline = 0;
+    var startedAt = 0;     // 這一題開始作答的時間,用來算作答秒數
     var timerId = null;
     var playerName = "";
 
@@ -318,12 +321,13 @@
       return /^HTTP (404|429|5\d\d)$/.test(m) || /Failed to fetch|NetworkError|Load failed/i.test(m);
     }
 
-    // answer 在伺服器端是冪等的(Code.gs 收到重複的 step 會直接回傳目前狀態),
-    // 所以重送安全。start 會產生新 session 與新的一列紀錄,不能自動重送。
+    // submit 在伺服器端是冪等的(已交卷的 session 會直接回傳先前成績,不重複計分),
+    // 所以重送安全。begin 會產生新 session 與新的一列紀錄,不能自動重送。
+    var RETRYABLE = { submit: true, answer: true };
     function postWithRetry(payload, tries) {
       tries = tries || 0;
       return post(payload).catch(function (err) {
-        var canRetry = payload.action === "answer" && tries < 3 && isTransient(err);
+        var canRetry = RETRYABLE[payload.action] && tries < 3 && isTransient(err);
         if (!canRetry) throw err;
         return new Promise(function (resolve) {
           setTimeout(resolve, 800 * Math.pow(2, tries));   // 0.8s → 1.6s → 3.2s
@@ -368,8 +372,18 @@
           pending = null;
           if (res.session) session = res.session;
           if (res.total) total = res.total;
-          if (res.done) renderResult(res);
-          else renderQuestion(res.question, res.step);
+
+          if (res.done) { renderResult(res); return; }
+
+          if (res.questions) {              // begin 的回應:一次拿到全部題目
+            questions = res.questions;
+            picks = [];
+            renderQuestion(0);
+            return;
+          }
+
+          // 回應既不是成績也不是題目 —— 寧可明確報錯,也不要拿 undefined 去畫面上炸
+          throw new Error("伺服器回應格式不符");
         })
         .catch(function (err) {
           busy = false;
@@ -457,16 +471,21 @@
       }
       session = null;
       question = null;
+      questions = [];
+      picks = [];
       $("pname").textContent = playerName;
       $("pmeta").textContent = "";
       $("pbar").style.width = "0%";
       setStatus("", "");
       show("screen-quiz");
-      send({ action: "start", name: playerName });
+      send({ action: "begin", name: playerName });
     });
 
     /* ---------- 作答畫面 ---------- */
-    function renderQuestion(q, s) {
+    function renderQuestion(s) {
+      var q = questions[s];
+      if (!q) { setStatus("err", "題目資料不完整,請重新開始"); return; }
+
       question = q;
       step = s;
       picked = null;
@@ -490,6 +509,7 @@
         input.addEventListener("change", function () {
           picked = i;
           $("btn-next").disabled = false;
+          setStatus("", "");          // 清掉上一題「離開畫面」的提示
         });
 
         var span = document.createElement("span");
@@ -503,12 +523,13 @@
 
       $("btn-next").disabled = true;
       $("btn-next").textContent = s === total - 1 ? "交卷" : "確定";
-      startTimer(q.remaining, q.limit);
+      startTimer(q.limit);
     }
 
-    function startTimer(remaining, limit) {
+    function startTimer(limit) {
       stopTimer();
-      deadline = Date.now() + remaining * 1000;
+      startedAt = Date.now();
+      deadline = startedAt + limit * 1000;
       var tick = function () {
         var left = Math.max(0, deadline - Date.now());
         $("tleft").textContent = Math.ceil(left / 1000) + " 秒";
@@ -528,9 +549,20 @@
     function submit(left) {
       if (busy || !question) return;
       stopTimer();
+
+      var secs = (Date.now() - startedAt) / 1000;
+      picks[step] = {
+        pick: left ? null : picked,
+        secs: Math.round(secs * 10) / 10,
+        left: !!left
+      };
+
       question = null;
       setStatus(left ? "err" : "", left ? "你剛剛離開了作答畫面,該題以答錯計算" : "");
-      send({ action: "answer", session: session, step: step, pick: left ? null : picked, left: !!left });
+
+      // 換題完全在本機,不跟伺服器往返 —— 所以是瞬間的
+      if (step < total - 1) renderQuestion(step + 1);
+      else send({ action: "submit", session: session, picks: picks });
     }
 
     $("btn-next").addEventListener("click", function () {
