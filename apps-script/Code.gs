@@ -14,6 +14,9 @@
 // 作答結果會寫進這個工作表,不存在時會自動建立
 var SHEET_NAME = '作答紀錄';
 
+// 即時排行榜工作表(用公式從作答紀錄算出來),不存在時會自動建立
+var RANK_SHEET_NAME = '排行榜';
+
 // 題庫工作表,不存在時會自動建立標題列
 var QUESTION_SHEET_NAME = '題庫';
 
@@ -26,6 +29,10 @@ var DEFAULT_TIME_LIMIT = 15;
 // 網路延遲的寬限時間(秒),超過「限時 + 寬限」才算逾時
 var GRACE_SECONDS = 5;
 
+// check_ 快取「已用過的名字」的秒數。管理者手動刪掉某列讓人重考時,
+// 輸入名字階段最多會多顯示這麼久的「已作答過」提醒(claim_ 不受影響)
+var NAME_CACHE_SECONDS = 120;
+
 // 每個人的題目順序、選項順序都打亂,避免互傳「第 3 題選 B」
 var SHUFFLE = true;
 
@@ -35,7 +42,7 @@ var SHOW_ANSWERS = false;
 
 var LETTERS = 'ABCDEF';
 var QUESTION_HEADER = ['題目', '選項A', '選項B', '選項C', '選項D', '選項E', '選項F', '正解', '解說', '限時秒數'];
-var RECORD_HEADER = ['開始時間', '作答編號', '姓名', '狀態', '得分', '總題數', '答對率', '離開畫面', '逾時'];
+var RECORD_HEADER = ['開始時間', '作答編號', '姓名', '狀態', '得分', '總題數', '答對率', '答對題數', '離開畫面', '逾時'];
 var MARKS = { ok: '○', wrong: '✕', timeout: '逾時', left: '離開' };
 
 
@@ -122,12 +129,25 @@ function begin_(data) {
 /**
  * 查名字有沒有用過。使用者在輸入名字時就會先問一次,
  * 所以按下「開始作答」的當下不必等網路。
+ *
+ * 這只是提早提醒,**不拿鎖**:真正擋重名的是 claim_ 與 finish_ 在鎖內的檢查,
+ * 這裡讀到稍微過時的結果也不會讓人鑽漏洞。不拿鎖才不會在大家同時輸入名字時
+ * 跟寫入搶同一把鎖。
+ *
+ * 已用過的名字會短暫記在快取裡(NAME_CACHE_SECONDS),重複查同一個名字就不必
+ * 再讀整張表。只快取「已用過」;沒用過的每次都讀表確認。
  */
 function check_(data) {
   var name = cleanName_(data.name);
-  var taken = withLock_(function () {
-    return nameTaken_(getSheet_(), name, data.session || '');
-  });
+  var own = data.session || '';
+  var key = 'n:' + name;
+  var cache = CacheService.getScriptCache();
+
+  var holder = cache.get(key);
+  if (holder) return { ok: true, type: 'check', name: name, taken: holder !== own };
+
+  var taken = nameTaken_(getSheet_(), name, own);
+  if (taken) cache.put(key, '1', NAME_CACHE_SECONDS);
   return { ok: true, type: 'check', name: name, taken: taken };
 }
 
@@ -183,6 +203,7 @@ function claim_(data) {
 
   sess.name = name;
   saveSession_(sess);
+  CacheService.getScriptCache().put('n:' + name, sess.code, NAME_CACHE_SECONDS);
   return { ok: true, type: 'claim' };
 }
 
@@ -390,7 +411,7 @@ function finish_(sess) {
   });
 
   var percent = Math.round(score / total * 100);
-  var row = [new Date(sess.startedAt), sess.code, sess.name, '完成', score, total, percent / 100, leaves, timeouts]
+  var row = [new Date(sess.startedAt), sess.code, sess.name, '完成', score, total, percent / 100, score + ' / ' + total, leaves, timeouts]
     .concat(cells);
 
   var dup = withLock_(function () {
@@ -523,8 +544,16 @@ function loadQuestions_() {
  * 但不會動到既有資料列。
  */
 function ensureHeader_(sheet, questionCount) {
-  var expected = RECORD_HEADER.length + questionCount * 3;
+  // 舊版沒有「答對題數」欄:在答對率(G)後面插入一欄,舊資料才不會錯位
+  var migrated = false;
   if (sheet.getLastRow() > 0 && sheet.getRange(1, 1).getDisplayValue() === RECORD_HEADER[0] &&
+      sheet.getRange(1, 8).getDisplayValue() === '離開畫面') {
+    sheet.insertColumnAfter(7);
+    migrated = true;                  // 新欄的標題還是空的,要往下重寫標題列
+  }
+
+  var expected = RECORD_HEADER.length + questionCount * 3;
+  if (!migrated && sheet.getLastRow() > 0 && sheet.getRange(1, 1).getDisplayValue() === RECORD_HEADER[0] &&
       sheet.getLastColumn() >= expected) return;
 
   var header = RECORD_HEADER.slice();
@@ -545,6 +574,33 @@ function ensureHeader_(sheet, questionCount) {
   sheet.setFrozenRows(1);
   sheet.getRange('A:A').setNumberFormat('yyyy/mm/dd hh:mm:ss');
   sheet.getRange('G:G').setNumberFormat('0%');
+
+  ensureRanking_(sheet.getParent());
+}
+
+
+/**
+ * 排行榜:只放公式,作答紀錄一有新的「完成」就即時更新,不用程式維護。
+ * 依得分高到低,同分的開始時間早的排前面,同分同名次。
+ * 已經存在就不動,所以你可以自己調整格式。
+ */
+function ensureRanking_(ss) {
+  if (ss.getSheetByName(RANK_SHEET_NAME)) return;
+
+  var sh = ss.insertSheet(RANK_SHEET_NAME);
+  sh.getRange(1, 1, 1, 5).setValues([['名次', '姓名', '得分', '答對題數', '答對率']])
+    .setFontWeight('bold')
+    .setBackground('#1C1612')
+    .setFontColor('#E8B547');
+  sh.setFrozenRows(1);
+
+  // 作答紀錄的欄位:A 開始時間, C 姓名, D 狀態, E 得分, G 答對率, H 答對題數
+  sh.getRange('B2').setFormula(
+    "=IFERROR(QUERY('" + SHEET_NAME + "'!A2:J, " +
+    "\"select C, E, H, G where D = '完成' order by E desc, A asc\", 0), \"\")");
+  // 得分由高到低排好,MATCH 找到同分的第一列,就是並列名次
+  sh.getRange('A2').setFormula('=ARRAYFORMULA(IF(C2:C="","",MATCH(C2:C,C2:C,0)))');
+  sh.getRange('E:E').setNumberFormat('0%');
 }
 
 
