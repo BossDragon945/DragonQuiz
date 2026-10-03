@@ -421,6 +421,7 @@
             var e = new Error((res && res.error) || "伺服器回報失敗");
             e.code = res && res.code;
             e.detail = res && res.detail;
+            if (e.code === "BUSY") e.transient = true;   // 伺服器排隊逾時,稍後重試
             throw e;
           }
           return checkType(payload, res);

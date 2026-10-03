@@ -90,6 +90,10 @@ function doPost(e) {
     if (data.action === 'submit') return jsonOut_(submit_(data));
     return jsonOut_({ ok: false, error: '不明的操作' });
   } catch (err) {
+    // 排隊等鎖逾時:這時還沒寫入任何資料,前端看到 BUSY 會自動重試
+    if (/鎖定逾時|lock timeout/i.test(errMsg_(err))) {
+      return jsonOut_({ ok: false, code: 'BUSY', error: '現在人比較多,請稍候再試' });
+    }
     return jsonOut_({ ok: false, error: errMsg_(err) });
   }
 }
@@ -465,9 +469,9 @@ function saveSession_(sess) {
 
 
 function withLock_(fn) {
-  // 多人同時作答時避免寫入互相覆蓋,最多等 20 秒
+  // 多人同時作答時避免寫入互相覆蓋,最多等 40 秒(同時開始的人多時會排隊)
   var lock = LockService.getScriptLock();
-  lock.waitLock(20000);
+  lock.waitLock(40000);
   try {
     return fn();
   } finally {
