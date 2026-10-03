@@ -689,8 +689,10 @@
         body.appendChild(document.createTextNode(text));
         // 選項翻譯顯示在選項文字下方,沒填的語言不顯示
         var otr = (q.otr && q.otr[i]) || {};
+        var shown = [text];            // 跟原文或前一行一模一樣的翻譯(例如英文專有名詞)不重複顯示
         ["ja", "vi", "en"].forEach(function (k) {
-          if (!otr[k]) return;
+          if (!otr[k] || shown.indexOf(otr[k]) !== -1) return;
+          shown.push(otr[k]);
           var t = document.createElement("small");
           t.lang = k;
           t.textContent = otr[k];
