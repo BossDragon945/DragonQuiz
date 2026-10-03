@@ -412,7 +412,7 @@ function finish_(sess) {
     if (r.status === 'left') leaves++;
     if (r.status === 'timeout') timeouts++;
     var yours = r.pick === null ? '' : q.options[r.pick];
-    cells.push(yours, MARKS[r.status], r.secs);
+    cells.push(yours, q.options[q.answer], MARKS[r.status], r.secs);
     review.push({ q: q.q, yours: yours, status: r.status, correct: q.options[q.answer], explain: q.explain });
   });
 
@@ -577,13 +577,13 @@ function ensureHeader_(sheet, questionCount) {
     migrated = true;                  // 新欄的標題還是空的,要往下重寫標題列
   }
 
-  var expected = RECORD_HEADER.length + questionCount * 3;
+  var expected = RECORD_HEADER.length + questionCount * 4;
   if (!migrated && sheet.getLastRow() > 0 && sheet.getRange(1, 1).getDisplayValue() === RECORD_HEADER[0] &&
       sheet.getLastColumn() >= expected) return;
 
   var header = RECORD_HEADER.slice();
   for (var i = 1; i <= questionCount; i++) {
-    header.push('第' + i + '題作答', '第' + i + '題', '第' + i + '題秒數');
+    header.push('第' + i + '題作答', '第' + i + '題正解', '第' + i + '題', '第' + i + '題秒數');
   }
 
   // 新工作表預設只有 26 欄,6 題以上就會超出,先把欄位補足
