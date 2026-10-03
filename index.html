@@ -59,6 +59,10 @@
       margin: 0 0 8px;
       text-align: center;
       letter-spacing: .04em;
+      /* 只在標題裡的空格處換行,不在詞中間斷開;各行盡量等長 */
+      word-break: keep-all;
+      overflow-wrap: break-word;
+      text-wrap: balance;
     }
 
     .subtitle { text-align: center; color: rgba(245,230,211,.62); margin: 0 0 28px; font-size: .95rem; }
