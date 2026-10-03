@@ -154,6 +154,14 @@
       border: 1px solid rgba(200,147,46,.5);
       border-radius: 50%;
     }
+    .otext { min-width: 0; }
+    .otext small {
+      display: block;
+      margin-top: 3px;
+      font-size: .82rem;
+      line-height: 1.45;
+      color: rgba(245,230,211,.62);
+    }
     .opt span:hover { background: rgba(200,147,46,.1); border-color: rgba(200,147,46,.5); }
     .opt input:focus-visible + span { outline: 2px solid var(--gold); outline-offset: 2px; }
     .opt input:checked + span {
@@ -675,7 +683,20 @@
 
         var span = document.createElement("span");
         span.setAttribute("data-letter", LETTERS[i] || (i + 1));
-        span.appendChild(document.createTextNode(text));
+
+        var body = document.createElement("div");
+        body.className = "otext";
+        body.appendChild(document.createTextNode(text));
+        // 選項翻譯顯示在選項文字下方,沒填的語言不顯示
+        var otr = (q.otr && q.otr[i]) || {};
+        ["ja", "vi", "en"].forEach(function (k) {
+          if (!otr[k]) return;
+          var t = document.createElement("small");
+          t.lang = k;
+          t.textContent = otr[k];
+          body.appendChild(t);
+        });
+        span.appendChild(body);
 
         label.appendChild(input);
         label.appendChild(span);

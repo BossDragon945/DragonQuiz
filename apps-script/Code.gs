@@ -44,7 +44,8 @@ var SHUFFLE = true;
 var SHOW_ANSWERS = false;
 
 var LETTERS = 'ABCDEF';
-var QUESTION_HEADER = ['題目', '選項A', '選項B', '選項C', '選項D', '選項E', '選項F', '正解', '解說', '限時秒數', '題目日文', '題目越南文', '題目英文'];
+var QUESTION_HEADER = ['題目', '選項A', '選項B', '選項C', '選項D', '選項E', '選項F', '正解', '解說', '限時秒數', '題目日文', '題目越南文', '題目英文',
+                       '選項日文', '選項越南文', '選項英文'];
 var RECORD_HEADER = ['開始時間', '作答編號', '姓名', '狀態', '得分', '總題數', '答對率', '答對題數', '離開畫面', '逾時'];
 var MARKS = { ok: '○', wrong: '✕', timeout: '逾時', left: '離開' };
 
@@ -123,7 +124,11 @@ function begin_(data) {
         q: q.q,
         options: q.perm.map(function (i) { return q.options[i]; }),
         limit: q.limit,
-        tr: q.tr
+        tr: q.tr,
+        // 選項翻譯跟著打亂後的選項順序,第 i 個對應畫面上的第 i 個選項
+        otr: q.perm.map(function (i) {
+          return { ja: q.optTr.ja[i] || '', vi: q.optTr.vi[i] || '', en: q.optTr.en[i] || '' };
+        })
       };
     })
   };
@@ -283,7 +288,7 @@ function newSession_(data) {
     questions: questions.map(function (q) {
       var perm = range_(q.options.length);
       if (SHUFFLE) shuffle_(perm);
-      return { q: q.q, options: q.options, answer: q.answer, explain: q.explain, limit: q.limit, tr: q.tr, perm: perm };
+      return { q: q.q, options: q.options, answer: q.answer, explain: q.explain, limit: q.limit, tr: q.tr, optTr: q.optTr, perm: perm };
     })
   };
 
@@ -507,6 +512,7 @@ function getQuestionSheet_() {
  * 讀取「題庫」工作表。每列一題:
  * 題目 | 選項A~F(至少兩個,中間不能空格)| 正解(填字母 A~F)| 解說(可留空)| 限時秒數(可留空)
  * | 題目日文 | 題目越南文 | 題目英文(都可留空,有填的會顯示在題目下方)
+ * | 選項日文 | 選項越南文 | 選項英文(可留空;選項依序用「|」隔開,顯示在各選項下方)
  * 題目欄空白的列會被略過。
  */
 function loadQuestions_() {
@@ -541,8 +547,21 @@ function loadQuestions_() {
     // 翻譯(可留空,沒填的語言不顯示):日文、越南文、英文
     var tr = [r[10], r[11], r[12]].map(function (t) { return String(t || '').trim(); });
 
+    // 選項翻譯:每個語言一格,選項依 A、B、C… 的順序用「|」隔開,數量要跟選項一樣
+    var optTr = { ja: [], vi: [], en: [] };
+    ['ja', 'vi', 'en'].forEach(function (k, n) {
+      var cell = String(r[13 + n] || '').trim();
+      if (!cell) return;
+      var parts = cell.split('|').map(function (t) { return t.trim(); });
+      if (parts.length !== options.length) {
+        throw new Error('題庫第 ' + rowNo + ' 列:' + ['選項日文', '選項越南文', '選項英文'][n] +
+                        '有 ' + parts.length + ' 個,但選項有 ' + options.length + ' 個(用「|」隔開)');
+      }
+      optTr[k] = parts;
+    });
+
     list.push({ q: q, options: options, answer: answer, explain: String(r[8]).trim(), limit: limit,
-                tr: { ja: tr[0], vi: tr[1], en: tr[2] } });
+                tr: { ja: tr[0], vi: tr[1], en: tr[2] }, optTr: optTr });
   });
 
   if (list.length === 0) throw new Error('題庫是空的,請在「' + QUESTION_SHEET_NAME + '」工作表填入題目');
