@@ -302,6 +302,8 @@ function newSession_(data) {
   });
 
   saveSession_(sess);
+  saveBackup_(sess);                    // 鎖外面做,不拖長排隊時間
+  if (Math.random() < 0.05) pruneBackups_();
   return sess;
 }
 
@@ -458,7 +460,75 @@ function finish_(sess) {
 function loadSession_(id) {
   if (typeof id !== 'string' || !id) return null;
   var raw = CacheService.getScriptCache().get('s:' + id);
-  return raw ? JSON.parse(raw) : null;
+  if (raw) return JSON.parse(raw);
+  return restoreSession_(id);          // 快取偶爾會讀不到,改從備份還原
+}
+
+
+/**
+ * 快取(CacheService)只是盡力而為,偶爾會讀不到剛存進去的東西。
+ * 所以開始作答時另外存一份精簡備份(只有題目順序與選項順序),
+ * 快取讀不到時用它加上現在的題庫把 session 重建出來,玩家不會因此丟掉作答。
+ * 代價:作答途中若有人改了題庫,重建後會用改過的內容(題數或選項數對不上就不還原)。
+ */
+function saveBackup_(sess) {
+  try {
+    PropertiesService.getScriptProperties().setProperty('s:' + sess.id, JSON.stringify({
+      c: sess.code,
+      t: sess.startedAt,
+      r: sess.row,
+      o: sess.order,
+      p: sess.questions.map(function (q) { return q.perm; })
+    }));
+  } catch (err) { /* 備份失敗不影響作答 */ }
+}
+
+
+function restoreSession_(id) {
+  try {
+    var raw = PropertiesService.getScriptProperties().getProperty('s:' + id);
+    if (!raw) return null;
+
+    var b = JSON.parse(raw);
+    var questions = loadQuestions_();
+    if (questions.length !== b.p.length || questions.length !== b.o.length) return null;
+    var same = questions.every(function (q, i) { return b.p[i].length === q.options.length; });
+    if (!same) return null;
+
+    var sess = {
+      id: id,
+      code: b.c,
+      name: '(未開始)',                 // 認領或交卷時會帶上真正的名字
+      startedAt: b.t,
+      row: b.r,
+      order: b.o,
+      results: [],
+      questions: questions.map(function (q, i) {
+        return { q: q.q, options: q.options, answer: q.answer, explain: q.explain,
+                 limit: q.limit, tr: q.tr, optTr: q.optTr, perm: b.p[i] };
+      })
+    };
+    saveSession_(sess);                 // 放回快取,後面的呼叫就不必再還原
+    return sess;
+  } catch (err) {
+    return null;
+  }
+}
+
+
+// 清掉超過 12 小時的備份,避免佔滿屬性空間。偶爾做一次就好
+function pruneBackups_() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var all = props.getProperties();
+    var cutoff = Date.now() - 12 * 3600 * 1000;
+    Object.keys(all).forEach(function (k) {
+      if (k.indexOf('s:') !== 0) return;
+      var old = true;
+      try { old = JSON.parse(all[k]).t < cutoff; } catch (err) { /* 壞掉的也清掉 */ }
+      if (old) props.deleteProperty(k);
+    });
+  } catch (err) { /* 清不掉就算了 */ }
 }
 
 
