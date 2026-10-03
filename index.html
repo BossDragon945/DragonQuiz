@@ -119,6 +119,15 @@
       color: #fff;
       margin: 0 0 20px;
     }
+    .qtext.has-tr { margin-bottom: 8px; }
+    .qtrans { margin: 0 0 20px; }
+    .qtrans p {
+      margin: 0 0 4px;
+      font-size: .92rem;
+      line-height: 1.5;
+      color: rgba(245,230,211,.72);
+    }
+    .qtrans p:last-child { margin-bottom: 0; }
 
     .opt { display: block; margin-bottom: 11px; }
     .opt input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -259,6 +268,7 @@
           <div class="bar tbar"><i id="tbar" style="width:100%"></i></div>
 
           <h2 class="qtext" id="qtext"></h2>
+          <div class="qtrans hidden" id="qtrans"></div>
           <div id="opts" role="radiogroup" aria-labelledby="qtext"></div>
 
           <button class="btn" id="btn-next" disabled>確定</button>
@@ -626,6 +636,21 @@
       $("pmeta").textContent = "第 " + (s + 1) + " / " + total + " 題";
       $("pbar").style.width = (s / total * 100) + "%";
       $("qtext").textContent = q.q;
+
+      // 翻譯顯示在題目下方,沒填的語言不顯示
+      var trBox = $("qtrans");
+      trBox.innerHTML = "";
+      var tr = q.tr || {};
+      ["ja", "vi", "en"].forEach(function (k) {
+        if (!tr[k]) return;
+        var p = document.createElement("p");
+        p.lang = k;
+        p.textContent = tr[k];
+        trBox.appendChild(p);
+      });
+      var hasTr = trBox.children.length > 0;
+      trBox.classList.toggle("hidden", !hasTr);
+      $("qtext").classList.toggle("has-tr", hasTr);
 
       var box = $("opts");
       box.innerHTML = "";

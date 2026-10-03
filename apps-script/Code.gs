@@ -41,7 +41,7 @@ var SHUFFLE = true;
 var SHOW_ANSWERS = false;
 
 var LETTERS = 'ABCDEF';
-var QUESTION_HEADER = ['題目', '選項A', '選項B', '選項C', '選項D', '選項E', '選項F', '正解', '解說', '限時秒數'];
+var QUESTION_HEADER = ['題目', '選項A', '選項B', '選項C', '選項D', '選項E', '選項F', '正解', '解說', '限時秒數', '題目日文', '題目越南文', '題目英文'];
 var RECORD_HEADER = ['開始時間', '作答編號', '姓名', '狀態', '得分', '總題數', '答對率', '答對題數', '離開畫面', '逾時'];
 var MARKS = { ok: '○', wrong: '✕', timeout: '逾時', left: '離開' };
 
@@ -119,7 +119,8 @@ function begin_(data) {
       return {
         q: q.q,
         options: q.perm.map(function (i) { return q.options[i]; }),
-        limit: q.limit
+        limit: q.limit,
+        tr: q.tr
       };
     })
   };
@@ -279,7 +280,7 @@ function newSession_(data) {
     questions: questions.map(function (q) {
       var perm = range_(q.options.length);
       if (SHUFFLE) shuffle_(perm);
-      return { q: q.q, options: q.options, answer: q.answer, explain: q.explain, limit: q.limit, perm: perm };
+      return { q: q.q, options: q.options, answer: q.answer, explain: q.explain, limit: q.limit, tr: q.tr, perm: perm };
     })
   };
 
@@ -500,6 +501,7 @@ function getQuestionSheet_() {
 /**
  * 讀取「題庫」工作表。每列一題:
  * 題目 | 選項A~F(至少兩個,中間不能空格)| 正解(填字母 A~F)| 解說(可留空)| 限時秒數(可留空)
+ * | 題目日文 | 題目越南文 | 題目英文(都可留空,有填的會顯示在題目下方)
  * 題目欄空白的列會被略過。
  */
 function loadQuestions_() {
@@ -531,7 +533,11 @@ function loadQuestions_() {
     var limit = limitText ? Number(limitText) : DEFAULT_TIME_LIMIT;
     if (!(limit >= 3 && limit <= 600)) throw new Error('題庫第 ' + rowNo + ' 列:限時秒數請填 3~600 的數字');
 
-    list.push({ q: q, options: options, answer: answer, explain: String(r[8]).trim(), limit: limit });
+    // 翻譯(可留空,沒填的語言不顯示):日文、越南文、英文
+    var tr = [r[10], r[11], r[12]].map(function (t) { return String(t || '').trim(); });
+
+    list.push({ q: q, options: options, answer: answer, explain: String(r[8]).trim(), limit: limit,
+                tr: { ja: tr[0], vi: tr[1], en: tr[2] } });
   });
 
   if (list.length === 0) throw new Error('題庫是空的,請在「' + QUESTION_SHEET_NAME + '」工作表填入題目');
