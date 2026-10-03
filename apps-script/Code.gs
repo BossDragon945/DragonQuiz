@@ -29,9 +29,6 @@ var DEFAULT_TIME_LIMIT = 15;
 // 網路延遲的寬限時間(秒),超過「限時 + 寬限」才算逾時
 var GRACE_SECONDS = 5;
 
-// 每答對一題的分數。20 題 × 5 分 = 滿分 100
-var POINTS_PER_QUESTION = 5;
-
 // check_ 快取「已用過的名字」的秒數。管理者手動刪掉某列讓人重考時,
 // 輸入名字階段最多會多顯示這麼久的「已作答過」提醒(claim_ 不受影響)
 var NAME_CACHE_SECONDS = 120;
@@ -405,13 +402,13 @@ function findRow_(sheet, sess) {
 
 function finish_(sess) {
   var total = sess.questions.length;
-  var correct = 0, leaves = 0, timeouts = 0;
+  var score = 0, leaves = 0, timeouts = 0;
   var cells = [];
   var review = [];
 
   sess.questions.forEach(function (q, i) {
     var r = sess.results[i] || { pick: null, status: 'timeout', secs: '' };
-    if (r.status === 'ok') correct++;
+    if (r.status === 'ok') score++;
     if (r.status === 'left') leaves++;
     if (r.status === 'timeout') timeouts++;
     var yours = r.pick === null ? '' : q.options[r.pick];
@@ -419,10 +416,8 @@ function finish_(sess) {
     review.push({ q: q.q, yours: yours, status: r.status, correct: q.options[q.answer], explain: q.explain });
   });
 
-  var score = correct * POINTS_PER_QUESTION;           // 得分(分數)
-  var maxScore = total * POINTS_PER_QUESTION;
-  var percent = Math.round(correct / total * 100);
-  var row = [new Date(sess.startedAt), sess.code, sess.name, '完成', score, total, percent / 100, correct + ' / ' + total, leaves, timeouts]
+  var percent = Math.round(score / total * 100);
+  var row = [new Date(sess.startedAt), sess.code, sess.name, '完成', score, total, percent / 100, score + ' / ' + total, leaves, timeouts]
     .concat(cells);
 
   var dup = withLock_(function () {
@@ -445,7 +440,7 @@ function finish_(sess) {
              error: '「' + sess.name + '」已經作答過了,這次成績不列入' };
   }
 
-  var res = { ok: true, type: 'result', done: true, score: score, maxScore: maxScore, correct: correct, total: total, percent: percent, leaves: leaves, timeouts: timeouts };
+  var res = { ok: true, type: 'result', done: true, score: score, total: total, percent: percent, leaves: leaves, timeouts: timeouts };
   if (SHOW_ANSWERS) res.review = review;
 
   sess.final = res;
