@@ -766,8 +766,9 @@
       stopTimer();
       question = null;
 
-      $("score").innerHTML = res.score + " / " + res.total +
-        "<small>答對率 " + res.percent + "%</small>";
+      $("score").innerHTML = res.score + " / " + (res.maxScore || res.total) +
+        "<small>答對 " + (res.correct !== undefined ? res.correct : res.score) + " / " + res.total +
+        " 題 · 答對率 " + res.percent + "%</small>";
       var notes = [];
       if (res.timeouts) notes.push("逾時 " + res.timeouts + " 題");
       if (res.leaves) notes.push("離開畫面 " + res.leaves + " 次");
