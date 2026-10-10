@@ -124,15 +124,33 @@
       color: #fff;
       margin: 0 0 20px;
     }
-    .qtext.has-tr { margin-bottom: 8px; }
     .qtrans { margin: 0 0 20px; }
+    /* 選到非中文時,翻譯就是題目本身,樣式與中文題目一致 */
     .qtrans p {
-      margin: 0 0 4px;
-      font-size: .92rem;
-      line-height: 1.5;
-      color: rgba(245,230,211,.72);
+      margin: 0;
+      font-weight: 700;
+      font-size: clamp(1.1rem, 3.6vw, 1.32rem);
+      line-height: 1.6;
+      color: #fff;
     }
-    .qtrans p:last-child { margin-bottom: 0; }
+
+    .langbar { display: flex; gap: 6px; margin: 0 0 14px; }
+    [lang="en"] { font-family: "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .langbar button {
+      flex: 1 1 0; min-width: 0;
+      white-space: nowrap;
+      padding: 7px 6px;
+      font: inherit; font-size: .88rem; font-weight: 500;
+      color: var(--gold-light);
+      background: transparent;
+      border: 1px solid rgba(200,147,46,.42);
+      border-radius: 99px;
+      cursor: pointer;
+      transition: background .15s;
+    }
+    .langbar button:hover { background: rgba(200,147,46,.12); }
+    .langbar button.on { background: var(--gold); color: var(--dark); border-color: var(--gold); font-weight: 700; }
+    .langbar button:focus-visible { outline: 2px solid var(--gold-light); outline-offset: 2px; }
 
     .opt { display: block; margin-bottom: 11px; }
     .opt input { position: absolute; opacity: 0; width: 0; height: 0; }
@@ -155,13 +173,7 @@
       border-radius: 50%;
     }
     .otext { min-width: 0; }
-    .otext small {
-      display: block;
-      margin-top: 3px;
-      font-size: .82rem;
-      line-height: 1.45;
-      color: rgba(245,230,211,.62);
-    }
+    .otext small { display: block; }
     .opt span:hover { background: rgba(200,147,46,.1); border-color: rgba(200,147,46,.5); }
     .opt input:focus-visible + span { outline: 2px solid var(--gold); outline-offset: 2px; }
     .opt input:checked + span {
@@ -226,12 +238,13 @@
       .bar { margin-bottom: 14px; }
       .tbar { margin-bottom: 12px; }
       .qtext { margin-bottom: 12px; }
-      .qtext.has-tr { margin-bottom: 6px; }
       .qtrans { margin-bottom: 14px; }
-      .qtrans p { font-size: .84rem; line-height: 1.45; }
+      .langbar { margin-bottom: 10px; }
+      .langbar button { font-size: .8rem; padding: 7px 2px; }
+      .qtext, .qtrans p { font-size: 1.05rem; line-height: 1.55; }
       .opt { margin-bottom: 8px; }
       .opt span { padding: 10px 12px; gap: 10px; }
-      .otext small { font-size: .78rem; margin-top: 2px; }
+      .otext { font-size: .98rem; line-height: 1.45; }
       #btn-next {
         position: sticky; bottom: 10px; z-index: 5;
         margin-top: 10px;
@@ -251,15 +264,17 @@
       #qbox:not(.hidden) {
         display: grid;
         grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        grid-template-rows: auto auto auto 1fr auto;   /* 多出來的高度給第 4 列,題目與翻譯才不會被撐開 */
+        grid-template-rows: auto auto auto auto 1fr auto;   /* 多出來的高度給第 5 列,題目與翻譯才不會被撐開 */
         column-gap: 36px;
         align-items: start;
       }
-      #qbox .timer, #qbox .tbar { grid-column: 1 / -1; }
-      #qbox .qtext { grid-column: 1; grid-row: 3; }
-      #qbox .qtrans { grid-column: 1; grid-row: 4; }
-      #qbox #opts { grid-column: 2; grid-row: 3 / span 2; }
-      #qbox #btn-next { grid-column: 2; grid-row: 5; margin-top: 6px; }
+      #qbox .timer { grid-column: 1 / -1; grid-row: 1; }
+      #qbox .tbar { grid-column: 1 / -1; grid-row: 2; }
+      #qbox .langbar { grid-column: 1 / -1; grid-row: 3; max-width: 520px; }
+      #qbox .qtext { grid-column: 1; grid-row: 4; }
+      #qbox .qtrans { grid-column: 1; grid-row: 5; }
+      #qbox #opts { grid-column: 2; grid-row: 4 / span 2; }
+      #qbox #btn-next { grid-column: 2; grid-row: 6; margin-top: 6px; }
       #qbox .qtrans.hidden { display: none !important; }
 
       /* 作答中隱藏大標題,並收緊間距,讓一整題一開始就在畫面內 */
@@ -272,10 +287,10 @@
       .tbar { margin-bottom: 14px; }
       .qtext { margin-bottom: 8px; font-size: 1.2rem; }
       .qtrans { margin-bottom: 0; }
-      .qtrans p { font-size: .88rem; line-height: 1.45; }
+      .qtrans p { font-size: 1.2rem; }
       .opt { margin-bottom: 8px; }
-      .opt span { padding: 9px 14px; }
-      .otext small { margin-top: 1px; font-size: .8rem; line-height: 1.4; }
+      .opt span { padding: 10px 14px; }
+      .langbar { margin-bottom: 12px; }
       #qbox #btn-next { position: sticky; bottom: 10px; z-index: 5; box-shadow: 0 0 0 8px var(--dark-soft); }
       #btn-next:disabled { opacity: 1; background: #4a3a1c; color: rgba(245,230,211,.5); }
     }
@@ -345,6 +360,11 @@
           <div class="timer" id="timer"><span>剩餘時間</span><b id="tleft"></b></div>
           <div class="bar tbar"><i id="tbar" style="width:100%"></i></div>
 
+          <div class="langbar" id="langbar" role="group" aria-label="語言 / 言語 / Language">
+            <button type="button" data-lang="zh">中文</button>
+            <button type="button" data-lang="ja">日本語</button>
+            <button type="button" data-lang="en">English</button>
+          </div>
           <h2 class="qtext" id="qtext"></h2>
           <div class="qtrans hidden" id="qtrans"></div>
           <div id="opts" role="radiogroup" aria-labelledby="qtext"></div>
@@ -720,16 +740,13 @@
       var trBox = $("qtrans");
       trBox.innerHTML = "";
       var tr = q.tr || {};
-      ["ja", "vi", "en"].forEach(function (k) {
+      ["ja", "en"].forEach(function (k) {
         if (!tr[k]) return;
         var p = document.createElement("p");
         p.lang = k;
         p.textContent = tr[k];
         trBox.appendChild(p);
       });
-      var hasTr = trBox.children.length > 0;
-      trBox.classList.toggle("hidden", !hasTr);
-      $("qtext").classList.toggle("has-tr", hasTr);
 
       var box = $("opts");
       box.innerHTML = "";
@@ -752,13 +769,14 @@
 
         var body = document.createElement("div");
         body.className = "otext";
-        body.appendChild(document.createTextNode(text));
-        // 選項翻譯顯示在選項文字下方,沒填的語言不顯示
+        var zh = document.createElement("div");
+        zh.className = "ozh";
+        zh.textContent = text;
+        body.appendChild(zh);
+        // 各語言的選項翻譯都先建好,由語言切換按鈕決定顯示哪一種(沒填的語言退回顯示中文)
         var otr = (q.otr && q.otr[i]) || {};
-        var shown = [text];            // 跟原文或前一行一模一樣的翻譯(例如英文專有名詞)不重複顯示
-        ["ja", "vi", "en"].forEach(function (k) {
-          if (!otr[k] || shown.indexOf(otr[k]) !== -1) return;
-          shown.push(otr[k]);
+        ["ja", "en"].forEach(function (k) {
+          if (!otr[k]) return;
           var t = document.createElement("small");
           t.lang = k;
           t.textContent = otr[k];
@@ -773,8 +791,48 @@
 
       $("btn-next").disabled = true;
       $("btn-next").textContent = s === total - 1 ? "交卷" : "確定";
+      applyLang();
       startTimer(q.limit);
     }
+
+    /* ---------- 語言切換:一次只顯示一種語言的題目與選項 ---------- */
+    var LANGS = ["zh", "ja", "en"];
+    var lang = "zh";
+    try {
+      var savedLang = localStorage.getItem("dq_lang");
+      if (LANGS.indexOf(savedLang) !== -1) lang = savedLang;
+    } catch (e) { /* 讀不到就用中文 */ }
+
+    function applyLang() {
+      var q = question;
+      if (!q) return;
+      var useQ = lang !== "zh" && q.tr && q.tr[lang];
+      $("qtext").classList.toggle("hidden", !!useQ);
+      $("qtrans").classList.toggle("hidden", !useQ);
+      Array.prototype.forEach.call($("qtrans").children, function (p) {
+        p.classList.toggle("hidden", p.lang !== lang);
+      });
+      Array.prototype.forEach.call($("opts").querySelectorAll(".otext"), function (body, i) {
+        var has = lang !== "zh" && q.otr && q.otr[i] && q.otr[i][lang];
+        body.querySelector(".ozh").classList.toggle("hidden", !!has);
+        Array.prototype.forEach.call(body.querySelectorAll("small"), function (t) {
+          t.classList.toggle("hidden", t.lang !== lang);
+        });
+      });
+      Array.prototype.forEach.call($("langbar").querySelectorAll("button"), function (b) {
+        var on = b.getAttribute("data-lang") === lang;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    }
+
+    $("langbar").addEventListener("click", function (e) {
+      var b = e.target.closest ? e.target.closest("button[data-lang]") : null;
+      if (!b) return;
+      lang = b.getAttribute("data-lang");
+      try { localStorage.setItem("dq_lang", lang); } catch (err) { /* 存不了就算了 */ }
+      applyLang();
+    });
 
     function startTimer(limit) {
       stopTimer();
