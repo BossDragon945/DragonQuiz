@@ -232,7 +232,10 @@
       body { padding: 10px 10px 24px; }
       .card { padding: 16px 14px; }
       /* 作答中隱藏大標題與副標題,把空間留給題目 */
-      .card:has(#screen-quiz:not(.hidden)) > h1,
+      /* 作答中標題縮小、不強制換行(約兩行),副標題隱藏 */
+      .card:has(#screen-quiz:not(.hidden)) > h1 {
+        font-size: 1.05rem; line-height: 1.45; white-space: normal; margin-bottom: 8px;
+      }
       .card:has(#screen-quiz:not(.hidden)) > .subtitle { display: none; }
       .progress-meta { margin-bottom: 6px; }
       .bar { margin-bottom: 14px; }
