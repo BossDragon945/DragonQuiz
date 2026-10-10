@@ -277,10 +277,7 @@
       #qbox #btn-next { grid-column: 2; grid-row: 6; margin-top: 6px; }
       #qbox .qtrans.hidden { display: none !important; }
 
-      /* 作答中標題縮成單行、副標題隱藏,並收緊間距,讓一整題一開始就在畫面內 */
-      .card:has(#screen-quiz:not(.hidden)) > h1 {
-        font-size: 1.25rem; white-space: normal; margin-bottom: 10px;
-      }
+      /* 作答中保留原本三行標題,副標題隱藏,並收緊間距 */
       .card:has(#screen-quiz:not(.hidden)) > .subtitle { display: none; }
       body { padding-top: 12px; }
       .card:has(#screen-quiz:not(.hidden)) { padding-top: 16px; padding-bottom: 16px; }
