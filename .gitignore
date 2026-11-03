@@ -10,3 +10,6 @@ desktop.ini
 # 本機草稿(不想公開的題庫草稿放這裡)
 drafts/
 *.local.json
+
+# 真題庫與翻譯貼上檔(不要公開)
+*_貼上用.tsv
