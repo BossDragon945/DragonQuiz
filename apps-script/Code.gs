@@ -173,10 +173,13 @@ function nameTaken_(sheet, name, ownCode) {
   var last = sheet.getLastRow();
   if (last < 2) return false;
 
+  // 試算表不顯示 cleanName_ 補的開頭單引號,比對時要一併去掉
+  var shown = name.replace(/^'/, '');
+
   // B=作答編號, C=姓名, D=狀態
   var vals = sheet.getRange(2, 2, last - 1, 3).getDisplayValues();
   for (var i = 0; i < vals.length; i++) {
-    if (vals[i][1] === name && vals[i][0] !== ownCode) return true;
+    if (vals[i][1] === shown && vals[i][0] !== ownCode) return true;
   }
   return false;
 }
@@ -309,7 +312,10 @@ function newSession_(data) {
 
 
 function cleanName_(v) {
-  return String(v || '').trim().slice(0, 20) || '(未具名)';
+  var name = String(v || '').trim().slice(0, 20) || '(未具名)';
+  // 開頭是 = + - @ 的姓名寫進試算表會被當成公式,前面補單引號變成純文字
+  if (/^[=+\-@]/.test(name)) name = "'" + name;
+  return name;
 }
 
 
