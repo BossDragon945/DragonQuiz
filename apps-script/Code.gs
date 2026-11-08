@@ -24,7 +24,7 @@ var QUESTION_SHEET_NAME = '題庫';
 var SETTING_SHEET_NAME = '設定';
 
 // 每題預設限時(秒);題庫「限時秒數」欄有填的題目以該欄為準
-var DEFAULT_TIME_LIMIT = 15;
+var DEFAULT_TIME_LIMIT = 20;
 
 // 網路延遲的寬限時間(秒),超過「限時 + 寬限」才算逾時
 var GRACE_SECONDS = 5;
@@ -686,7 +686,7 @@ function ensureHeader_(sheet, questionCount) {
 
 /**
  * 排行榜:只放公式,作答紀錄一有新的「完成」就即時更新,不用程式維護。
- * 依得分高到低,同分的開始時間早的排前面,同分同名次。
+ * 依得分高到低,同分的開始時間早的排前面,同分同名次,名次連續(1,1,1,2,2,3...)。
  * 已經存在就不動,所以你可以自己調整格式。
  */
 function ensureRanking_(ss) {
@@ -703,8 +703,8 @@ function ensureRanking_(ss) {
   sh.getRange('B2').setFormula(
     "=IFERROR(QUERY('" + SHEET_NAME + "'!A2:J, " +
     "\"select C, E, H, G where D = '完成' order by E desc, A asc\", 0), \"\")");
-  // 得分由高到低排好,MATCH 找到同分的第一列,就是並列名次
-  sh.getRange('A2').setFormula('=ARRAYFORMULA(IF(C2:C="","",MATCH(C2:C,C2:C,0)))');
+  // 得分由高到低排好,名次是「第幾種分數」:同分並列,下一個分數接著排(1,1,1,2,2,3...)
+  sh.getRange('A2').setFormula('=ARRAYFORMULA(IF(C2:C="","",MATCH(C2:C,UNIQUE(C2:C),0)))');
   sh.getRange('E:E').setNumberFormat('0%');
 }
 
