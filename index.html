@@ -297,6 +297,14 @@
       #btn-next:disabled { opacity: 1; background: #4a3a1c; color: rgba(245,230,211,.5); }
     }
 
+    .more-hint {
+      position: fixed; left: 50%; transform: translateX(-50%);
+      bottom: 84px; z-index: 6; pointer-events: none;
+      background: var(--gold); color: var(--dark); font-size: .85rem; font-weight: 700;
+      padding: 6px 14px; border-radius: 999px; box-shadow: 0 4px 14px rgba(0,0,0,.5);
+    }
+    @media (min-width: 960px) { .more-hint { display: none !important; } }
+
     .hidden { display: none !important; }
     .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -371,6 +379,7 @@
           <div class="qtrans hidden" id="qtrans"></div>
           <div id="opts" role="radiogroup" aria-labelledby="qtext"></div>
 
+          <div id="more-hint" class="more-hint hidden" aria-hidden="true">▼ 往下滑還有選項</div>
           <button class="btn" id="btn-next" disabled>確定</button>
         </div>
 
@@ -794,8 +803,28 @@
       $("btn-next").disabled = true;
       $("btn-next").textContent = s === total - 1 ? "交卷" : "確定";
       applyLang();
+      window.scrollTo(0, 0);          // 上一題捲到下面時,新題要從頭看
       startTimer(q.limit);
+      updateMoreHint();
     }
+
+    /* ---------- 手機版:選項還沒完全露出時,提示往下滑 ---------- */
+    function updateMoreHint() {
+      var hint = $("more-hint");
+      var opts = $("opts");
+      var btn = $("btn-next");
+      if (!question || !opts || $("qbox").classList.contains("hidden")) {
+        hint.classList.add("hidden");
+        return;
+      }
+      var vh = window.innerHeight || document.documentElement.clientHeight;
+      var reserved = btn.offsetHeight + 24;     // 固定在底部的「確定」會佔掉一塊
+      var hidden = opts.getBoundingClientRect().bottom > vh - reserved + 2;
+      hint.classList.toggle("hidden", !hidden);
+    }
+    window.addEventListener("scroll", updateMoreHint, { passive: true });
+    window.addEventListener("resize", updateMoreHint);
+    $("langbar").addEventListener("click", function () { setTimeout(updateMoreHint, 0); });
 
     /* ---------- 語言切換:一次只顯示一種語言的題目與選項 ---------- */
     var LANGS = ["zh", "ja", "en"];
@@ -905,10 +934,22 @@
     function onLeave() {
       if (question && !busy) submit(true);
     }
+    // iOS Safari 的系統手勢、通知、網址列動作可能讓頁面瞬間「隱藏」又立刻回來。
+    // 隱藏當下不判錯,回來時若離開超過 1.5 秒才算(查答案不可能比這更快)。
+    var hiddenAt = 0;
     document.addEventListener("visibilitychange", function () {
-      if (document.hidden) onLeave();
+      if (document.hidden) {
+        if (!hiddenAt) hiddenAt = Date.now();
+      } else if (hiddenAt) {
+        var away = Date.now() - hiddenAt;
+        hiddenAt = 0;
+        if (away > 1500) onLeave();
+      }
     });
-    window.addEventListener("blur", onLeave);
+    // 手機捲動、網址列收合、系統手勢都可能誤觸 blur,所以觸控裝置只靠 visibilitychange
+    var isTouch = (window.matchMedia && matchMedia("(pointer: coarse)").matches) ||
+      "ontouchstart" in window || navigator.maxTouchPoints > 0;
+    if (!isTouch) window.addEventListener("blur", onLeave);
 
     // 作答中不能複製、右鍵、拖曳題目文字
     ["copy", "cut", "contextmenu", "selectstart", "dragstart"].forEach(function (type) {
